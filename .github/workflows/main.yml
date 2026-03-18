@@ -1,10 +1,8 @@
-name: Flutter CI
+name: Flutter CI/CD
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches: [ "main" ] # ඔයාගේ branch එකේ නම දාන්න
 
 jobs:
   build:
@@ -13,7 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install Flutter
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
@@ -21,8 +25,11 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Check for errors
-        run: flutter analyze
+      - name: Build APK
+        run: flutter build apk --release
 
-      - name: Run Build Test
-        run: flutter build apk --debug
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
