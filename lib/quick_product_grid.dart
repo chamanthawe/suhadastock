@@ -89,8 +89,9 @@ class _QuickProductGridState extends State<QuickProductGrid> {
                       "${widget.baseUrl}/products?consumer_key=${widget.ck}&consumer_secret=${widget.cs}&search=$v&per_page=30",
                     ),
                   );
-                  if (r.statusCode == 200)
+                  if (r.statusCode == 200) {
                     setMState(() => res = json.decode(r.body));
+                  }
                 },
               ),
               Expanded(

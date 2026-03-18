@@ -40,7 +40,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
       backgroundColor: Colors.white,
-      child: Container(
+      child: SizedBox(
         width: MediaQuery.of(context).size.width * 0.70,
         height: MediaQuery.of(context).size.height * 0.7,
         child: Column(
@@ -201,12 +201,13 @@ class _PaymentDialogState extends State<PaymentDialog> {
         child: InkWell(
           onTap: () {
             setState(() {
-              if (isClear)
+              if (isClear) {
                 calcInput = "";
-              else if (label == "." && !calcInput.contains("."))
-                calcInput += label;
-              else if (label != ".")
-                calcInput += label;
+              } else if (label == "." && !calcInput.contains(".")) {
+                calcInput += label; // මෙතනට { } දැම්මා
+              } else if (label != ".") {
+                calcInput += label; // මෙතනටත් { } දැම්මා
+              }
             });
           },
           child: Container(

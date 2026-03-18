@@ -197,11 +197,10 @@ class _AfterPayScreenState extends State<AfterPayScreen> {
       // 4. Return success and customer name back to OrderScreen
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Error: $e")));
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -296,7 +295,7 @@ Ti informiamo che un importo di *€${amount.toStringAsFixed(2)}* è stato aggiu
           hintText: "Enter Phone Number...",
           prefixIcon: Icon(Icons.search, color: primaryGreen),
           filled: true,
-          fillColor: primaryGreen.withOpacity(0.05),
+          fillColor: primaryGreen.withValues(alpha: 0.05),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(15),
             borderSide: BorderSide.none,
@@ -311,8 +310,9 @@ Ti informiamo che un importo di *€${amount.toStringAsFixed(2)}* è stato aggiu
       child: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance.collection('customers').snapshots(),
         builder: (context, snapshot) {
-          if (!snapshot.hasData)
+          if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
+          }
           var docs = snapshot.data!.docs.where((d) {
             var data = d.data() as Map<String, dynamic>;
             return (data['phone'] ?? "").toString().contains(
@@ -320,8 +320,9 @@ Ti informiamo che un importo di *€${amount.toStringAsFixed(2)}* è stato aggiu
             );
           }).toList();
 
-          if (docs.isEmpty && _searchController.text.length > 5)
+          if (docs.isEmpty && _searchController.text.length > 5) {
             return _buildNewCustomerForm();
+          }
 
           return ListView.builder(
             itemCount: docs.length,

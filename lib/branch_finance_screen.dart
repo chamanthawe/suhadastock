@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:ui';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -80,8 +79,9 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
 
       var filteredStaff = staffSnapshot.docs.where((doc) {
         String dStr = doc['date'] ?? "";
-        if (selectedRange == null)
+        if (selectedRange == null) {
           return dStr == DateFormat('yyyy-MM-dd').format(DateTime.now());
+        }
         DateTime d = DateFormat('yyyy-MM-dd').parse(dStr);
         return d.isAfter(
               selectedRange!.start.subtract(const Duration(days: 1)),
@@ -233,8 +233,9 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                   .where('shop', isEqualTo: widget.branchName)
                   .snapshots(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData)
+                if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
+                }
 
                 var allDocs = snapshot.data!.docs;
                 var filteredDocs = allDocs.where((doc) {

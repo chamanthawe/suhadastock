@@ -1,8 +1,8 @@
+import 'package:barcode_widget/barcode_widget.dart' as bw;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Vibration සඳහා
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:barcode_widget/barcode_widget.dart' as bw;
 
 class MobileOrderScreen extends StatefulWidget {
   const MobileOrderScreen({super.key});
@@ -84,9 +84,9 @@ class _MobileOrderScreenState extends State<MobileOrderScreen> {
   }
 
   double get totalAmount {
-    return cartItems.fold(0, (sum, item) {
+    return cartItems.fold(0, (total, item) {
       double price = double.tryParse(item['price'].toString()) ?? 0.0;
-      return sum + (price * item['qty']);
+      return total + (price * item['qty']);
     });
   }
 
@@ -327,11 +327,12 @@ class _MobileOrderScreenState extends State<MobileOrderScreen> {
           ),
         ) ??
         false;
-    if (confirm)
+    if (confirm) {
       await FirebaseFirestore.instance
           .collection('pending_orders')
           .doc(docId)
           .delete();
+    }
   }
 
   @override
@@ -421,8 +422,9 @@ class _MobileOrderScreenState extends State<MobileOrderScreen> {
                 .where('status', isEqualTo: 'pending')
                 .snapshots(),
             builder: (context, snapshot) {
-              if (!snapshot.hasData)
+              if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
+              }
               var orders = snapshot.data!.docs;
               return ListView.builder(
                 padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -641,8 +643,9 @@ class _MobileOrderScreenState extends State<MobileOrderScreen> {
                       .collection('products_data')
                       .snapshots(),
                   builder: (context, snapshot) {
-                    if (!snapshot.hasData)
+                    if (!snapshot.hasData) {
                       return const Center(child: CircularProgressIndicator());
+                    }
                     var filtered = snapshot.data!.docs.where((d) {
                       var data = d.data() as Map<String, dynamic>;
                       String name = (data['name'] ?? "")

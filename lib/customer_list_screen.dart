@@ -20,11 +20,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
 
     String debtStr = debt.toStringAsFixed(2);
     String message =
-        "Gentile $name,\n\n" +
-        "🇮🇹 Ti inviamo un cordiale promemoria da *Suhada S.R.L.S.* Il tuo saldo in sospeso è di *€$debtStr*. Ti preghiamo gentilmente di regolarizzarlo appena possibile. Grazie! 🙏\n\n" +
-        "🇱🇰 *Suhada S.R.L.S.* ආයතනයෙන් කෙරෙන කාරුණික සිහිපත් කිරීමකි. ඔබ ගෙවීමට ඇති ඉතිරි මුදල වන *€$debtStr* පියවන ලෙස කාරුණිකව ඉල්ලා සිටිමු. ස්තූතියි! 🙏\n\n" +
-        "__________________________\n" +
-        "🤖 *Messaggio Automatico / මෙය ස්වයංක්‍රීයව ලැබෙන පණිවිඩයකි.*";
+        "Gentile $name,\n\n" "🇮🇹 Ti inviamo un cordiale promemoria da *Suhada S.R.L.S.* Il tuo saldo in sospeso è di *€$debtStr*. Ti preghiamo gentilmente di regolarizzarlo appena possibile. Grazie! 🙏\n\n" "🇱🇰 *Suhada S.R.L.S.* ආයතනයෙන් කෙරෙන කාරුණික සිහිපත් කිරීමකි. ඔබ ගෙවීමට ඇති ඉතිරි මුදල වන *€$debtStr* පියවන ලෙස කාරුණිකව ඉල්ලා සිටිමු. ස්තූතියි! 🙏\n\n" "__________________________\n" "🤖 *Messaggio Automatico / මෙය ස්වයංක්‍රීයව ලැබෙන පණිවිඩයකි.*";
 
     final Uri whatsappUri = Uri.parse(
       "whatsapp://send?phone=$cleanPhone&text=${Uri.encodeComponent(message)}",
@@ -186,10 +182,12 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                   .collection('customers')
                   .snapshots(),
               builder: (context, snapshot) {
-                if (snapshot.hasError)
+                if (snapshot.hasError) {
                   return const Center(child: Text("Error loading data"));
-                if (!snapshot.hasData)
+                }
+                if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
+                }
 
                 // දත්ත සියල්ලම List එකකට ගන්නවා
                 var docs = snapshot.data!.docs;

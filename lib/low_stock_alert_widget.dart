@@ -1,5 +1,5 @@
-import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
 
 class LowStockAlertWidget extends StatelessWidget {
   final Map<String, dynamic> product;
@@ -30,7 +30,7 @@ class LowStockAlertWidget extends StatelessWidget {
             borderRadius: BorderRadius.circular(25),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.3),
+                color: Colors.black.withValues(alpha: 0.3),
                 blurRadius: 25,
                 offset: const Offset(0, 10),
               ),
@@ -118,7 +118,9 @@ class LowStockAlertWidget extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: Colors.red[50],
                   borderRadius: BorderRadius.circular(30),
-                  border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+                  border: Border.all(
+                    color: Colors.redAccent.withValues(alpha: 0.3),
+                  ),
                 ),
                 child: Text(
                   "Only $currentStock Items Left!",

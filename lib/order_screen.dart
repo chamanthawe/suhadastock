@@ -1,26 +1,27 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:ui';
+
+import 'package:audioplayers/audioplayers.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'dart:async';
-import 'dart:ui';
 import 'package:intl/intl.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:audioplayers/audioplayers.dart';
 
+import 'action_buttons_grid.dart';
 // Imports
 import 'after_pay_screen.dart';
-import 'printer_manager.dart';
-import 'receipt_service.dart';
-import 'payment_dialog.dart';
-import 'action_buttons_grid.dart';
 import 'calculator_screen.dart';
-import 'orderscreen_setting.dart';
-import 'quick_product_grid.dart';
-import 'search_overlay_widget.dart';
-import 'offline_overlay_widget.dart';
 import 'low_stock_alert_widget.dart';
+import 'offline_overlay_widget.dart';
+import 'orderscreen_setting.dart';
+import 'payment_dialog.dart';
+import 'printer_manager.dart';
+import 'quick_product_grid.dart';
+import 'receipt_service.dart';
+import 'search_overlay_widget.dart';
 
 List<Map<String, dynamic>> globalCart = [];
 double globalDiscount = 0;
@@ -181,10 +182,12 @@ class _OrderScreenState extends State<OrderScreen> {
               'cassia_stock': data['cassia_stock'] ?? 0,
               'image': data['image'] ?? "",
             };
-            if (productInfo['sku'] != "")
+            if (productInfo['sku'] != "") {
               tempMap[productInfo['sku']!] = productInfo;
-            if (productInfo['barcode'] != "")
+            }
+            if (productInfo['barcode'] != "") {
               tempMap[productInfo['barcode']!] = productInfo;
+            }
             tempMap[doc.id] = productInfo;
           }
           if (mounted) {
@@ -518,6 +521,7 @@ class _OrderScreenState extends State<OrderScreen> {
         .toList();
 
     if (matchingProducts.isEmpty) {
+      if (!mounted) return;
       _playErrorSound();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -690,11 +694,12 @@ class _OrderScreenState extends State<OrderScreen> {
       tempT += item['finalPrice'];
       tempP += (unitProfit * (item['qty'] as double));
     }
-    if (mounted)
+    if (mounted) {
       setState(() {
         totalValue = (tempT - globalDiscount).clamp(0, double.infinity);
         totalProfit = (tempP - globalDiscount).clamp(0, double.infinity);
       });
+    }
   }
 
   // --- අලුතින් යාවත්කාලීන කළ addToCart ---

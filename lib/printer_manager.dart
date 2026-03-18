@@ -1,5 +1,6 @@
-import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:esc_pos_printer_plus/esc_pos_printer_plus.dart'; // මේක හරියට තියෙන්න ඕනේ
+import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class PrinterManager {
@@ -42,7 +43,7 @@ class PrinterManager {
       await saveIP(ip);
       return true;
     } catch (e) {
-      print("Connect error: $e");
+      debugPrint("Connect error: $e");
       isConnected = false;
       printer = null;
       return false;

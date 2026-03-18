@@ -83,7 +83,7 @@ class ReceiptService {
         double currentPrice = item['price'] as double;
         double lineTotal = (item['finalPrice'] as double);
 
-        p.text("$cleanName", styles: const PosStyles(bold: true));
+        p.text(cleanName, styles: const PosStyles(bold: true));
 
         // භාණ්ඩයට Discount එකක් තිබේ නම් (ඔයා එවපු රූපයේ තිබූ ආකාරයට)
         bool hasItemDiscount =

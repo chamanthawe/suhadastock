@@ -1,24 +1,26 @@
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'dart:async';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:stocksuhada/notification_panel.dart';
-import 'dart:async';
-import 'constants.dart';
+
+import 'add_product_screen.dart';
 import 'bill_management_screen.dart';
 import 'branch_finance_screen.dart';
+import 'constants.dart';
+import 'customer_list_screen.dart';
+import 'mobile_order_screen.dart';
+import 'order_request_screen.dart';
 import 'order_screen.dart';
 import 'printer_manager.dart';
 import 'product_details_screen.dart';
-import 'order_request_screen.dart';
 import 'stock_update_screen.dart';
-import 'add_product_screen.dart';
-import 'customer_list_screen.dart';
-import 'mobile_order_screen.dart';
 
 class ProductListScreen extends StatefulWidget {
   final List initialProducts;
@@ -124,13 +126,16 @@ class _ProductListScreenState extends State<ProductListScreen>
         _fetchAllProductsInBackground();
       }
     } catch (e) {
-      if (mounted) Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Login Failed: ${e.toString()}"),
-          backgroundColor: Colors.red,
-        ),
-      );
+      // මේ විදියට block එකක් ඇතුළට දාන්න
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Login Failed: ${e.toString()}"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -143,18 +148,20 @@ class _ProductListScreenState extends State<ProductListScreen>
           for (var doc in snapshot.docs) {
             freshData[doc.id] = doc.data();
           }
-          if (mounted)
+          if (mounted) {
             setState(() {
               _firestoreStocks = freshData;
               existingFirestoreIds = freshData.keys.toSet();
             });
+          }
         });
   }
 
   String _getEffectiveStock(Map p, String key) {
     String id = p['id'].toString();
-    if (_firestoreStocks.containsKey(id))
+    if (_firestoreStocks.containsKey(id)) {
       return _firestoreStocks[id]![key]?.toString() ?? "0";
+    }
     List meta = p['meta_data'] ?? [];
     var found = meta.firstWhere((m) => m['key'] == key, orElse: () => null);
     return found != null ? found['value'].toString() : "0";
@@ -173,9 +180,9 @@ class _ProductListScreenState extends State<ProductListScreen>
         final response = await http.get(Uri.parse(url));
         if (response.statusCode == 200) {
           List data = json.decode(response.body);
-          if (data.isEmpty)
+          if (data.isEmpty) {
             moreToFetch = false;
-          else {
+          } else {
             allFetched.addAll(data);
             currentPage++;
             if (allFetched.length >= 2000) moreToFetch = false;
@@ -184,11 +191,12 @@ class _ProductListScreenState extends State<ProductListScreen>
           moreToFetch = false;
         }
       }
-      if (mounted)
+      if (mounted) {
         setState(() {
           fullProductsList = allFetched;
           isBackgroundLoading = false;
         });
+      }
     } catch (e) {
       if (mounted) setState(() => isBackgroundLoading = false);
     }
@@ -210,13 +218,14 @@ class _ProductListScreenState extends State<ProductListScreen>
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
         List fetched = json.decode(response.body);
-        if (mounted)
+        if (mounted) {
           setState(() {
             if (isInitial) products.clear();
             if (fetched.length < 50) hasMore = false;
             products.addAll(fetched);
             page++;
           });
+        }
       }
     } finally {
       if (mounted) setState(() => isLoading = false);
@@ -564,7 +573,7 @@ class _ProductListScreenState extends State<ProductListScreen>
         child: Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.15),
+            color: Colors.white.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(18),
           ),
           child: Row(
@@ -648,8 +657,9 @@ class _ProductListScreenState extends State<ProductListScreen>
         controller: _scrollController,
         itemCount: filteredList.length + (isLoading ? 1 : 0),
         itemBuilder: (context, index) {
-          if (index == filteredList.length)
+          if (index == filteredList.length) {
             return const Center(child: CircularProgressIndicator());
+          }
           var p = filteredList[index];
           String sellingPrice = _getEffectiveStock(p, 'shop_price');
           if (sellingPrice == "0") sellingPrice = p['price'].toString();
@@ -856,6 +866,7 @@ class _ProductListScreenState extends State<ProductListScreen>
   void _showInitialSetupDialog() async {
     final prefs = await SharedPreferences.getInstance();
     _ipController.text = prefs.getString('printer_ip') ?? "";
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -896,6 +907,10 @@ class _ProductListScreenState extends State<ProductListScreen>
             onPressed: () async {
               await prefs.setString('printer_ip', _ipController.text);
               await PrinterManager.connect(_ipController.text);
+
+              // මේ line එක ඇතුළත් කරන්න
+              if (!context.mounted) return;
+
               Navigator.pop(context);
               Navigator.push(
                 context,

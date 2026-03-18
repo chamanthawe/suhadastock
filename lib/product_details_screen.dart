@@ -1,9 +1,11 @@
+import 'dart:convert';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+
 import 'constants.dart';
 
 class ProductDetailsScreen extends StatefulWidget {
@@ -286,6 +288,8 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
         body: json.encode(body),
       );
 
+      if (!mounted) return;
+
       if (response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -481,7 +485,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
       borderRadius: BorderRadius.circular(20),
       boxShadow: [
         BoxShadow(
-          color: Colors.grey.withOpacity(0.1),
+          color: Colors.grey.withValues(alpha: 0.1),
           blurRadius: 10,
           offset: const Offset(0, 4),
         ),
@@ -541,7 +545,9 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
             size: 20,
           ),
           filled: true,
-          fillColor: highlight ? darkGreen.withOpacity(0.05) : Colors.grey[50],
+          fillColor: highlight
+              ? darkGreen.withValues(alpha: 0.05)
+              : Colors.grey[50],
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide.none,

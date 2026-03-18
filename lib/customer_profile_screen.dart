@@ -247,10 +247,11 @@ __________________________
           .doc(widget.customerId)
           .snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData)
+        if (!snapshot.hasData) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
+        }
 
         var userData = snapshot.data!.data() as Map<String, dynamic>? ?? {};
         double totalDebt =
@@ -420,10 +421,11 @@ __________________________
                     .orderBy('date', descending: true)
                     .snapshots(),
                 builder: (context, hSnapshot) {
-                  if (!hSnapshot.hasData)
+                  if (!hSnapshot.hasData) {
                     return const SliverToBoxAdapter(
                       child: Center(child: CircularProgressIndicator()),
                     );
+                  }
 
                   return SliverList(
                     delegate: SliverChildBuilderDelegate((context, i) {
