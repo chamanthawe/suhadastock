@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class AfterPayScreen extends StatefulWidget {
   final double totalAmount;
@@ -107,7 +107,7 @@ class _AfterPayScreenState extends State<AfterPayScreen> {
                     ),
                     secondary: const Icon(Icons.chat, color: Colors.green),
                     value: _sendWhatsAppCheck,
-                    activeColor: primaryGreen,
+                    activeThumbColor: primaryGreen,
                     onChanged: (val) {
                       setDialogState(() => _sendWhatsAppCheck = val);
                       setState(() => _sendWhatsAppCheck = val);
