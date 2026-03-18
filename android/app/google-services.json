@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "910011999028",
+    "project_id": "suhada-inventory",
+    "storage_bucket": "suhada-inventory.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:910011999028:android:1a6021dd891c75fe38fb61",
+        "android_client_info": {
+          "package_name": "com.example.stocksuhada"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBgIkKkT8Pa8HHkIfbc8adz2vCF7IqoVII"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
