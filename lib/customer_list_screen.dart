@@ -1,6 +1,7 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import 'customer_profile_screen.dart';
 
 class CustomerListScreen extends StatefulWidget {
@@ -20,7 +21,11 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
 
     String debtStr = debt.toStringAsFixed(2);
     String message =
-        "Gentile $name,\n\n" "🇮🇹 Ti inviamo un cordiale promemoria da *Suhada S.R.L.S.* Il tuo saldo in sospeso è di *€$debtStr*. Ti preghiamo gentilmente di regolarizzarlo appena possibile. Grazie! 🙏\n\n" "🇱🇰 *Suhada S.R.L.S.* ආයතනයෙන් කෙරෙන කාරුණික සිහිපත් කිරීමකි. ඔබ ගෙවීමට ඇති ඉතිරි මුදල වන *€$debtStr* පියවන ලෙස කාරුණිකව ඉල්ලා සිටිමු. ස්තූතියි! 🙏\n\n" "__________________________\n" "🤖 *Messaggio Automatico / මෙය ස්වයංක්‍රීයව ලැබෙන පණිවිඩයකි.*";
+        "Gentile $name,\n\n"
+        "🇮🇹 Ti inviamo un cordiale promemoria da *Suhada S.R.L.S.* Il tuo saldo in sospeso è di *€$debtStr*. Ti preghiamo gentilmente di regolarizzarlo appena possibile. Grazie! 🙏\n\n"
+        "🇱🇰 *Suhada S.R.L.S.* ආයතනයෙන් කෙරෙන කාරුණික සිහිපත් කිරීමකි. ඔබ ගෙවීමට ඇති ඉතිරි මුදල වන *€$debtStr* පියවන ලෙස කාරුණිකව ඉල්ලා සිටිමු. ස්තූතියි! 🙏\n\n"
+        "__________________________\n"
+        "🤖 *Messaggio Automatico / මෙය ස්වයංක්‍රීයව ලැබෙන පණිවිඩයකි.*";
 
     final Uri whatsappUri = Uri.parse(
       "whatsapp://send?phone=$cleanPhone&text=${Uri.encodeComponent(message)}",
@@ -40,64 +45,116 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
     }
   }
 
+  // 🟢 Customer Form එකේදී Shop එක තේරීමට
   void _showCustomerForm({
     String? id,
     String? currentName,
     String? currentPhone,
+    String? currentShop,
   }) {
     final nameController = TextEditingController(text: currentName);
     final phoneController = TextEditingController(text: currentPhone);
+    String selectedShop = currentShop ?? ""; // මුලින් Shop එකක් නැත
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
-        title: Text(id == null ? "New Customer" : "Update Customer"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              decoration: InputDecoration(
-                labelText: "Full Name",
-                prefixIcon: const Icon(Icons.person),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(15),
-                ),
-              ),
-            ),
-            const SizedBox(height: 15),
-            TextField(
-              controller: phoneController,
-              decoration: InputDecoration(
-                labelText: "Phone Number",
-                prefixIcon: const Icon(Icons.phone),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(15),
-                ),
-              ),
-              keyboardType: TextInputType.phone,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(25),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1B5E20),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          title: Text(id == null ? "New Customer" : "Update Customer"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: InputDecoration(
+                  labelText: "Full Name",
+                  prefixIcon: const Icon(Icons.person),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                ),
               ),
+              const SizedBox(height: 15),
+              TextField(
+                controller: phoneController,
+                decoration: InputDecoration(
+                  labelText: "Phone Number",
+                  prefixIcon: const Icon(Icons.phone),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                ),
+                keyboardType: TextInputType.phone,
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                "Select Shop",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: Colors.grey,
+                ),
+              ),
+              const SizedBox(height: 10),
+              // 🟢 Shop Selection Chips
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ChoiceChip(
+                    label: const Text("Cassia"),
+                    selected: selectedShop == "Cassia",
+                    selectedColor: const Color(0xFF1B5E20).withOpacity(0.2),
+                    onSelected: (val) {
+                      setDialogState(() => selectedShop = "Cassia");
+                    },
+                  ),
+                  const SizedBox(width: 10),
+                  ChoiceChip(
+                    label: const Text("Battistini"),
+                    selected: selectedShop == "Battistini",
+                    selectedColor: const Color(0xFF1B5E20).withOpacity(0.2),
+                    onSelected: (val) {
+                      setDialogState(() => selectedShop = "Battistini");
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel"),
             ),
-            onPressed: () async {
-              if (nameController.text.isNotEmpty) {
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed: () async {
+                if (nameController.text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Please enter a name")),
+                  );
+                  return;
+                }
+                if (selectedShop.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Please select a shop")),
+                  );
+                  return;
+                }
+
                 if (id == null) {
                   await FirebaseFirestore.instance.collection('customers').add({
                     'name': nameController.text,
                     'phone': phoneController.text,
+                    'shop': selectedShop, // 🟢 Firestore එකට Save කිරීම
                     'total_debt': 0.0,
                     'created_at': FieldValue.serverTimestamp(),
                   });
@@ -108,14 +165,17 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                       .update({
                         'name': nameController.text,
                         'phone': phoneController.text,
+                        'shop': selectedShop, // 🟢 Update කිරීම
                       });
                 }
-                if (mounted) Navigator.pop(context);
-              }
-            },
-            child: const Text("Save", style: TextStyle(color: Colors.white)),
-          ),
-        ],
+                if (context.mounted) {
+                  Navigator.pop(context);
+                }
+              },
+              child: const Text("Save", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -176,8 +236,6 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
           ),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              // 🔴 orderBy අයින් කළා. මොකද created_at නැති අය පේන්නේ නැති වෙන නිසා.
-              // ඒ වෙනුවට raw stream එක අරගෙන App එක ඇතුළේදී sort කරනවා.
               stream: FirebaseFirestore.instance
                   .collection('customers')
                   .snapshots(),
@@ -189,17 +247,14 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                // දත්ත සියල්ලම List එකකට ගන්නවා
                 var docs = snapshot.data!.docs;
 
-                // Search filtering
                 var filteredDocs = docs.where((d) {
                   var data = d.data() as Map<String, dynamic>;
                   String name = (data['name'] ?? "").toString().toLowerCase();
                   return name.contains(_searchController.text.toLowerCase());
                 }).toList();
 
-                // 🟢 අකුරු පිළිවෙලට (A-Z) Sort කිරීම
                 filteredDocs.sort((a, b) {
                   String nameA =
                       (a.data() as Map<String, dynamic>)['name']
@@ -235,6 +290,8 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                         0.0;
                     String name = data['name'] ?? "Unknown";
                     String phone = data['phone'] ?? "No Phone";
+                    String shop =
+                        data['shop'] ?? "No Shop"; // 🟢 Shop එක පෙන්වීමට
 
                     return Container(
                       margin: const EdgeInsets.symmetric(
@@ -264,6 +321,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                           id: filteredDocs[i].id,
                           currentName: name,
                           currentPhone: phone,
+                          currentShop: shop, // 🟢 Edit කරද්දී Shop එක යැවීම
                         ),
                         leading: CircleAvatar(
                           backgroundColor: Colors.green[700],
@@ -279,7 +337,8 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                           name,
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: Text(phone),
+                        // 🟢 Subtitle එකේ Shop එක සහ Phone එක පෙන්වීම
+                        subtitle: Text("$phone • $shop"),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [

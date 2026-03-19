@@ -291,16 +291,17 @@ class _ProductListScreenState extends State<ProductListScreen>
             ],
           ),
           actions: [
-            // --- Notification Badge with StreamBuilder ---
+            // --- Notification Badge with StreamBuilder (Real-time Count) ---
             StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collection('notifications')
-                  .where('isRead', isEqualTo: false)
+                  // මෙතන isRead false ඒව විතරක් ගණන් කරනවා නම් (optional)
+                  // .where('isRead', isEqualTo: false)
                   .snapshots(),
               builder: (context, snapshot) {
-                int unreadCount = 0;
+                int notificationCount = 0;
                 if (snapshot.hasData) {
-                  unreadCount = snapshot.data!.docs.length;
+                  notificationCount = snapshot.data!.docs.length;
                 }
 
                 return Stack(
@@ -315,7 +316,8 @@ class _ProductListScreenState extends State<ProductListScreen>
                         ),
                       ),
                     ),
-                    if (unreadCount > 0)
+                    // Notification තිබේ නම් පමණක් රතු රවුම පෙන්වයි
+                    if (notificationCount > 0)
                       Positioned(
                         right: 8,
                         top: 8,
@@ -324,13 +326,17 @@ class _ProductListScreenState extends State<ProductListScreen>
                           decoration: BoxDecoration(
                             color: Colors.red,
                             borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: darkGreen,
+                              width: 1,
+                            ), // AppBar එකට ගැලපෙන්න
                           ),
                           constraints: const BoxConstraints(
-                            minWidth: 16,
-                            minHeight: 16,
+                            minWidth: 18,
+                            minHeight: 18,
                           ),
                           child: Text(
-                            '$unreadCount',
+                            '$notificationCount',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 10,

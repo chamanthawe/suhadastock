@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class CustomerProfileScreen extends StatefulWidget {
   final String customerId;
@@ -14,8 +14,7 @@ class CustomerProfileScreen extends StatefulWidget {
 
 class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
   final TextEditingController _paymentController = TextEditingController();
-  final TextEditingController _limitController =
-      TextEditingController(); // Limit එක සඳහා අලුත් Controller එකක්
+  final TextEditingController _limitController = TextEditingController();
 
   // WhatsApp පණිවිඩය යැවීම
   Future<void> _sendWhatsAppMessage(String phone, String message) async {
@@ -39,68 +38,129 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
     }
   }
 
-  // Credit Limit එක Update කරන Function එක
-  Future<void> _updateCreditLimit(double newLimit) async {
+  // 🟢 Credit Limit එක සහ Shop එක එකවර Update කරන Function එක
+  Future<void> _updateCustomerSettings(double newLimit, String newShop) async {
     try {
       await FirebaseFirestore.instance
           .collection('customers')
           .doc(widget.customerId)
-          .update({'credit_limit': newLimit});
+          .update({
+            'credit_limit': newLimit,
+            'shop': newShop, // Firestore එකේ Save කිරීම
+          });
 
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              "Credit limit updated to €${newLimit.toStringAsFixed(2)}",
+              "Settings updated: Limit €${newLimit.toStringAsFixed(2)} | Shop: $newShop",
             ),
           ),
         );
       }
     } catch (e) {
-      debugPrint("Limit Update Error: $e");
+      debugPrint("Update Error: $e");
     }
   }
 
-  // Limit එක ඇතුළත් කිරීමට Dialog එක
-  void _showLimitEditDialog(double currentLimit) {
+  // 🟢 Settings (Limit & Shop) Edit Dialog එක
+  void _showLimitEditDialog(double currentLimit, String currentShop) {
     _limitController.text = currentLimit.toStringAsFixed(2);
+    String selectedShop = currentShop.isEmpty ? "Cassia" : currentShop;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text(
-          "Set Credit Limit",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        content: TextField(
-          controller: _limitController,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: InputDecoration(
-            prefixText: "€ ",
-            labelText: "Max Credit Allowed",
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
+          title: const Text(
+            "Customer Settings",
+            style: TextStyle(fontWeight: FontWeight.bold),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1B5E20),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Select Shop",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: Colors.grey,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ChoiceChip(
+                    label: const Text("Cassia"),
+                    selected: selectedShop == "Cassia",
+                    onSelected: (val) {
+                      if (val) setDialogState(() => selectedShop = "Cassia");
+                    },
+                  ),
+                  const SizedBox(width: 10),
+                  ChoiceChip(
+                    label: const Text("Battistini"),
+                    selected: selectedShop == "Battistini",
+                    onSelected: (val) {
+                      if (val)
+                        setDialogState(() => selectedShop = "Battistini");
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                "Credit Limit",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: Colors.grey,
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _limitController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  prefixText: "€ ",
+                  labelText: "Max Credit Allowed",
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel"),
             ),
-            onPressed: () {
-              double? val = double.tryParse(_limitController.text);
-              if (val != null) _updateCreditLimit(val);
-            },
-            child: const Text(
-              "Save Limit",
-              style: TextStyle(color: Colors.white),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20),
+              ),
+              onPressed: () {
+                double? val = double.tryParse(_limitController.text);
+                if (val != null) {
+                  _updateCustomerSettings(val, selectedShop);
+                }
+              },
+              child: const Text(
+                "Save Changes",
+                style: TextStyle(color: Colors.white),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -260,6 +320,7 @@ __________________________
             double.tryParse(userData['credit_limit']?.toString() ?? "50.0") ??
             50.0;
         String name = userData['name'] ?? "Customer Profile";
+        String currentShop = userData['shop'] ?? ""; // පවතින Shop එක
 
         return Scaffold(
           backgroundColor: Colors.grey[100],
@@ -275,7 +336,9 @@ __________________________
                       Icons.settings_suggest,
                       color: Colors.white,
                     ),
-                    onPressed: () => _showLimitEditDialog(creditLimit),
+                    // 🟢 currentShop එකත් Dialog එකට යවනවා
+                    onPressed: () =>
+                        _showLimitEditDialog(creditLimit, currentShop),
                   ),
                 ],
                 flexibleSpace: FlexibleSpaceBar(
@@ -312,8 +375,9 @@ __________________________
                             fontWeight: FontWeight.bold,
                           ),
                         ),
+                        // 🟢 Shop එකේ නම Profile එකේ පෙන්වීම
                         Text(
-                          userData['phone'] ?? "",
+                          "${userData['phone'] ?? ""} ${currentShop.isNotEmpty ? "• $currentShop" : ""}",
                           style: const TextStyle(color: Colors.white70),
                         ),
                       ],
@@ -321,7 +385,6 @@ __________________________
                   ),
                 ),
               ),
-
               SliverToBoxAdapter(
                 child: Container(
                   margin: const EdgeInsets.all(20),
@@ -357,7 +420,6 @@ __________________________
                               : Colors.green[700],
                         ),
                       ),
-                      // Limit එක පෙන්වන කොටස
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
@@ -398,7 +460,6 @@ __________________________
                   ),
                 ),
               ),
-
               const SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 25, vertical: 10),
@@ -412,7 +473,6 @@ __________________________
                   ),
                 ),
               ),
-
               StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('customers')

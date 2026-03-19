@@ -410,7 +410,6 @@ class _OrderScreenState extends State<OrderScreen> {
             onDiscount: _applyDiscount,
             onCredit: () async {
               if (globalCart.isEmpty) return;
-              double creditAmt = totalValue;
 
               // AfterPay එකට ගිහින් එනකම් ඉන්නවා
               var result = await Navigator.push(
@@ -426,17 +425,6 @@ class _OrderScreenState extends State<OrderScreen> {
               if (result == true) {
                 // AfterPay එක සාර්ථක නම්
                 // Notification එක Firestore එකට යවනවා
-                await FirebaseFirestore.instance.collection('notifications').add({
-                  'type': 'credit_order',
-                  'productName':
-                      'New Credit Order', // මෙතනට පාරිභෝගික නමක් දාන්නත් පුළුවන්
-                  'value': creditAmt.toStringAsFixed(2),
-                  'shop': widget.selectedShop,
-                  'timestamp': FieldValue.serverTimestamp(),
-                  'isRead': false,
-                  'imageUrl':
-                      'https://cdn-icons-png.flaticon.com/512/951/951764.png', // Credit icon එකක්
-                });
 
                 await _handlePrint(isCredit: true);
               }

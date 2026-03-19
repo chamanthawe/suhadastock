@@ -8,14 +8,14 @@ class NotificationPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // සදාහරිත තද කොළ පැහැය සහ වර්ණ සංකලනය
+    // වර්ණ සංකලනය
     final Color primaryGreen = const Color(0xFF1B5E20);
     final Color secondaryGreen = const Color(0xFF2E7D32);
     final Color accentOrange = const Color(0xFFFF8F00);
     final Color creditRed = const Color(0xFFD32F2F);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F1), // ලා කොළ/සුදු පසුබිම
+      backgroundColor: const Color(0xFFF1F5F1),
       appBar: AppBar(
         title: const Text(
           "Notifications",
@@ -184,7 +184,7 @@ class NotificationPanel extends StatelessWidget {
                                     )
                                   : Icon(
                                       isCredit
-                                          ? Icons.person
+                                          ? Icons.account_balance_wallet_rounded
                                           : Icons.inventory_2_rounded,
                                       color: isCredit
                                           ? creditRed
@@ -202,9 +202,11 @@ class NotificationPanel extends StatelessWidget {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  // Customer Name (Credit නම්) හෝ Product Name
+                                  // Title
                                   Text(
-                                    data['productName'] ?? "Unknown",
+                                    isCredit
+                                        ? "New Credit Order"
+                                        : (data['productName'] ?? "Unknown"),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
@@ -215,6 +217,20 @@ class NotificationPanel extends StatelessWidget {
                                           : primaryGreen,
                                     ),
                                   ),
+
+                                  // Credit Order එකක් නම් Customer Name පෙන්වීම
+                                  if (isCredit) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      "Customer: ${data['name'] ?? 'Unknown'}", // Firestore එකේ තියෙන්නෙ 'name'
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.grey[800],
+                                      ),
+                                    ),
+                                  ],
+
                                   const SizedBox(height: 4),
                                   Row(
                                     children: [
@@ -233,7 +249,7 @@ class NotificationPanel extends StatelessWidget {
                                         ),
                                         child: Text(
                                           isCredit
-                                              ? "Total: €${data['value'] ?? '0.00'}"
+                                              ? "Amount: €${data['last_order_amount'] ?? '0.00'}" // Firestore එකේ තියෙන්නෙ 'last_order_amount'
                                               : "Stock: ${data['remainingStock'] ?? '0'}",
                                           style: TextStyle(
                                             color: isCredit
@@ -245,11 +261,14 @@ class NotificationPanel extends StatelessWidget {
                                         ),
                                       ),
                                       const SizedBox(width: 8),
-                                      Text(
-                                        "|  ${data['shop'] ?? ''}",
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                          fontSize: 12,
+                                      Expanded(
+                                        child: Text(
+                                          "|  ${data['shop'] ?? ''}",
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: Colors.grey[600],
+                                            fontSize: 12,
+                                          ),
                                         ),
                                       ),
                                     ],

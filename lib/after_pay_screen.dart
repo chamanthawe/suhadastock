@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class AfterPayScreen extends StatefulWidget {
@@ -23,14 +24,22 @@ class _AfterPayScreenState extends State<AfterPayScreen> {
   bool _isSaving = false;
   bool _sendWhatsAppCheck = true;
 
+  // 🟢 අලුත් Customer සඳහා Shop එක තෝරා ගැනීමට
+  String _selectedShopForNewCustomer = "";
+
   // Green Theme Colors
   final Color primaryGreen = const Color(0xFF1B5E20);
   final Color accentGreen = const Color(0xFF2E7D32);
 
+  // 🟢 App එකේ මුලින්ම තෝරන Shop එක (Default එකක් ලෙස)
+  Future<String> _getSavedShopName() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('selected_shop') ?? "Suhada Inventory";
+  }
+
   double _calculateTransactionProfit() {
     double totalProfit = 0;
     for (var item in widget.cartItems) {
-      // මෙතන profit එක item එක ඇතුලේ තියෙන key එක අනුව හරියටම ගන්න
       double p = double.tryParse(item['profit']?.toString() ?? "0") ?? 0.0;
       double q = double.tryParse(item['qty']?.toString() ?? "1") ?? 1.0;
       totalProfit += (p * q);
@@ -41,6 +50,8 @@ class _AfterPayScreenState extends State<AfterPayScreen> {
   void _confirmCreditOrder(Map<String, dynamic> customerData, String docId) {
     String name = customerData['name'] ?? "Unknown";
     String phone = customerData['phone'] ?? "";
+    // 🟢 Customer ගේ දත්ත වලින් Shop එක ගන්නවා
+    String customerShop = customerData['shop'] ?? "";
 
     double currentDebt =
         double.tryParse(customerData['total_debt']?.toString() ?? "0") ?? 0.0;
@@ -68,6 +79,12 @@ class _AfterPayScreenState extends State<AfterPayScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text("Customer: $name", style: const TextStyle(fontSize: 16)),
+              // 🟢 Shop එක පෙන්වීම (අවශ්‍ය නම් පමණක්)
+              if (customerShop.isNotEmpty)
+                Text(
+                  "Shop: $customerShop",
+                  style: const TextStyle(fontSize: 14, color: Colors.grey),
+                ),
               const SizedBox(height: 5),
               Text(
                 "Total Amount: €${widget.totalAmount.toStringAsFixed(2)}",
@@ -77,43 +94,19 @@ class _AfterPayScreenState extends State<AfterPayScreen> {
                   color: isOverLimit ? Colors.red : primaryGreen,
                 ),
               ),
-              if (isOverLimit) ...[
-                const SizedBox(height: 15),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.red[50],
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    "This customer has reached their credit limit of €${limit.toStringAsFixed(2)}.",
-                    style: const TextStyle(
-                      color: Colors.red,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
               const Divider(height: 30),
-              AbsorbPointer(
-                absorbing: isOverLimit,
-                child: Opacity(
-                  opacity: isOverLimit ? 0.5 : 1.0,
-                  child: SwitchListTile(
-                    title: const Text(
-                      "Send WhatsApp Notification",
-                      style: TextStyle(fontSize: 14),
-                    ),
-                    secondary: const Icon(Icons.chat, color: Colors.green),
-                    value: _sendWhatsAppCheck,
-                    activeThumbColor: primaryGreen,
-                    onChanged: (val) {
-                      setDialogState(() => _sendWhatsAppCheck = val);
-                      setState(() => _sendWhatsAppCheck = val);
-                    },
-                  ),
+              SwitchListTile(
+                title: const Text(
+                  "Send WhatsApp Notification",
+                  style: TextStyle(fontSize: 14),
                 ),
+                secondary: const Icon(Icons.chat, color: Colors.green),
+                value: _sendWhatsAppCheck,
+                activeColor: primaryGreen,
+                onChanged: (val) {
+                  setDialogState(() => _sendWhatsAppCheck = val);
+                  setState(() => _sendWhatsAppCheck = val);
+                },
               ),
             ],
           ),
@@ -130,7 +123,8 @@ class _AfterPayScreenState extends State<AfterPayScreen> {
                 ),
                 onPressed: () {
                   Navigator.pop(context);
-                  _processCreditOrder(docId, name, phone);
+                  // 🟢 CustomerShop එක function එකට යවනවා
+                  _processCreditOrder(docId, name, phone, customerShop);
                 },
                 child: const Text("Confirm & Save"),
               ),
@@ -144,59 +138,64 @@ class _AfterPayScreenState extends State<AfterPayScreen> {
     String docId,
     String name,
     String phone,
+    String customerShop, // 🟢 Shop එක parameter එකක් ලෙස ගත්තා
   ) async {
     if (_isSaving) return;
     setState(() => _isSaving = true);
 
     double transactionProfit = _calculateTransactionProfit();
 
+    // 🟢 Customer ගේ shop එකක් නැත්නම් පමණක් default shop එක ගන්නවා
+    String activeShop = customerShop.isNotEmpty
+        ? customerShop
+        : await _getSavedShopName();
+
     try {
-      // 1. Update Customer Record
-      await FirebaseFirestore.instance.collection('customers').doc(docId).set({
+      WriteBatch batch = FirebaseFirestore.instance.batch();
+
+      DocumentReference customerRef = FirebaseFirestore.instance
+          .collection('customers')
+          .doc(docId);
+      batch.set(customerRef, {
         'name': name,
         'phone': phone,
+        'shop': activeShop, // 🟢 අලුත් customer කෙනෙක් නම් shop එක save වෙනවා
         'total_debt': FieldValue.increment(widget.totalAmount),
         'last_order_amount': widget.totalAmount,
         'total_profit_accumulated': FieldValue.increment(transactionProfit),
         'last_updated': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // 2. Add to History
-      await FirebaseFirestore.instance
-          .collection('customers')
-          .doc(docId)
-          .collection('history')
-          .add({
-            'items': widget.cartItems,
-            'amount': widget.totalAmount,
-            'profit_earned': transactionProfit,
-            'date': DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()),
-            'status': 'NOT PAID',
-            'type': 'ORDER',
-          });
-
-      // 3. --- NEW: Send Notification to Notification Panel ---
-      await FirebaseFirestore.instance.collection('notifications').add({
-        'type': 'credit_order',
-        'productName': 'Credit Order: $name', // Notification එකේ පෙන්නන නම
-        'remainingStock': widget.totalAmount.toStringAsFixed(
-          2,
-        ), // මුදල පෙන්වීමට මෙය භාවිතා කරයි
-        'shop': 'Branch Name', // මෙතනට ඔයාගේ branch එකේ නම pass කරන්න පුළුවන්
-        'imageUrl':
-            'https://cdn-icons-png.flaticon.com/512/951/951764.png', // Credit icon url
-        'timestamp': FieldValue.serverTimestamp(),
-        'isRead': false,
-        'customer': name,
+      DocumentReference historyRef = customerRef.collection('history').doc();
+      batch.set(historyRef, {
+        'items': widget.cartItems,
+        'amount': widget.totalAmount,
+        'profit_earned': transactionProfit,
+        'shop': activeShop, // 🟢 History එකටත් shop එක දැම්මා
+        'date': DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()),
+        'status': 'NOT PAID',
+        'type': 'ORDER',
       });
 
-      if (_sendWhatsAppCheck) {
-        _sendWhatsAppNotification(phone, name, widget.totalAmount);
-      }
+      // 🔔 Notification යවන කොටස
+      DocumentReference notifyRef = FirebaseFirestore.instance
+          .collection('notifications')
+          .doc();
+      batch.set(notifyRef, {
+        'type': 'credit_order',
+        'name': name,
+        'last_order_amount': widget.totalAmount,
+        'shop': activeShop, // 🟢 මෙතනට දැන් customer ගේ shop එක වැටෙනවා
+        'timestamp': FieldValue.serverTimestamp(),
+        'imageUrl': '',
+      });
 
-      // 4. Return success and customer name back to OrderScreen
+      await batch.commit();
+      if (_sendWhatsAppCheck)
+        _sendWhatsAppNotification(phone, name, widget.totalAmount, activeShop);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
+      setState(() => _isSaving = false);
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -208,47 +207,36 @@ class _AfterPayScreenState extends State<AfterPayScreen> {
     String phone,
     String name,
     double amount,
+    String shopName,
   ) async {
     String cleanPhone = phone.replaceAll(RegExp(r'[^0-9]'), '');
     if (!cleanPhone.startsWith('39')) cleanPhone = "39$cleanPhone";
 
+    // 🟢 WhatsApp පණිවිඩයටත් Shop එකේ නම එකතු කළා
     String msg =
-        """
-Gentile $name,
-Ti informiamo che un importo di *€${amount.toStringAsFixed(2)}* è stato aggiunto al tuo conto credito. 🇱🇰 ඔබගේ ණය ගිණුමට *€${amount.toStringAsFixed(2)}* ක මුදලක් ඇතුළත් කරන ලදී. ස්තූතියි!
-""";
+        "Gentile $name,\nTi informiamo che un importo di *€${amount.toStringAsFixed(2)}* è stato aggiunto al tuo conto credito presso *$shopName*. 🇱🇰 *$shopName* ආයතනයේ ඔබගේ ණය ගිණුමට *€${amount.toStringAsFixed(2)}* ක මුදලක් ඇතුළත් කරන ලදී. ස්තූතියි!";
 
-    final String url =
-        "whatsapp://send?phone=$cleanPhone&text=${Uri.encodeComponent(msg)}";
-    final Uri whatsappUri = Uri.parse(url);
-
-    try {
-      if (await canLaunchUrl(whatsappUri)) {
-        await launchUrl(whatsappUri);
-      } else {
-        await launchUrl(
-          Uri.parse(
-            "https://wa.me/$cleanPhone?text=${Uri.encodeComponent(msg)}",
-          ),
-          mode: LaunchMode.externalApplication,
-        );
-      }
-    } catch (e) {
-      debugPrint("WhatsApp Error: $e");
+    final Uri url = Uri.parse(
+      "https://wa.me/$cleanPhone?text=${Uri.encodeComponent(msg)}",
+    );
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      debugPrint("WhatsApp error");
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // build method එකේ ඉතිරි කොටස ඔයා දුන්න එකමයි, කිසිම වෙනසක් කළේ නැහැ...
-    // (ඉඩ ඉතිරි කර ගැනීමට මෙතනින් පහළ කොටස කෙටි කළා)
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Select Credit Customer"),
+        title: const Text(
+          "Select Credit Customer",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
         backgroundColor: primaryGreen,
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: _isSaving
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(child: CircularProgressIndicator(color: primaryGreen))
           : Column(
               children: [
                 _buildTotalHeader(),
@@ -259,7 +247,6 @@ Ti informiamo che un importo di *€${amount.toStringAsFixed(2)}* è stato aggiu
     );
   }
 
-  // Header සහ Search build කරන methods ටික (ඔයාගේ කලින් code එකමයි)
   Widget _buildTotalHeader() {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -295,7 +282,7 @@ Ti informiamo che un importo di *€${amount.toStringAsFixed(2)}* è stato aggiu
           hintText: "Enter Phone Number...",
           prefixIcon: Icon(Icons.search, color: primaryGreen),
           filled: true,
-          fillColor: primaryGreen.withValues(alpha: 0.05),
+          fillColor: primaryGreen.withOpacity(0.05),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(15),
             borderSide: BorderSide.none,
@@ -310,9 +297,8 @@ Ti informiamo che un importo di *€${amount.toStringAsFixed(2)}* è stato aggiu
       child: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance.collection('customers').snapshots(),
         builder: (context, snapshot) {
-          if (!snapshot.hasData) {
+          if (!snapshot.hasData)
             return const Center(child: CircularProgressIndicator());
-          }
           var docs = snapshot.data!.docs.where((d) {
             var data = d.data() as Map<String, dynamic>;
             return (data['phone'] ?? "").toString().contains(
@@ -320,21 +306,39 @@ Ti informiamo che un importo di *€${amount.toStringAsFixed(2)}* è stato aggiu
             );
           }).toList();
 
-          if (docs.isEmpty && _searchController.text.length > 5) {
+          if (docs.isEmpty && _searchController.text.length > 5)
             return _buildNewCustomerForm();
-          }
 
           return ListView.builder(
             itemCount: docs.length,
+            padding: const EdgeInsets.symmetric(vertical: 10),
             itemBuilder: (context, i) {
               var data = docs[i].data() as Map<String, dynamic>;
+              double debt =
+                  double.tryParse(data['total_debt']?.toString() ?? "0") ?? 0.0;
+              // 🟢 Customer ගේ Shop එක පෙන්වීමට අවශ්‍ය නම් Subtitle එකට දාන්න පුළුවන්
+              String shop = data['shop'] ?? "";
+
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                 child: ListTile(
-                  title: Text(data['name'] ?? "No Name"),
-                  subtitle: Text(data['phone'] ?? ""),
+                  leading: CircleAvatar(
+                    backgroundColor: primaryGreen,
+                    child: const Icon(Icons.person, color: Colors.white),
+                  ),
+                  title: Text(
+                    data['name'] ?? "No Name",
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text(
+                    "${data['phone'] ?? ""} ${shop.isNotEmpty ? "• $shop" : ""}",
+                  ),
                   trailing: Text(
-                    "€${(double.tryParse(data['total_debt'].toString()) ?? 0).toStringAsFixed(2)}",
+                    "€${debt.toStringAsFixed(2)}",
+                    style: const TextStyle(
+                      color: Colors.red,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   onTap: () => _confirmCreditOrder(data, docs[i].id),
                 ),
@@ -351,31 +355,100 @@ Ti informiamo che un importo di *€${amount.toStringAsFixed(2)}* è stato aggiu
       padding: const EdgeInsets.all(25),
       child: Column(
         children: [
+          Icon(Icons.person_add_alt_1, size: 60, color: primaryGreen),
+          const SizedBox(height: 10),
           const Text(
             "New Customer Found!",
-            style: TextStyle(fontWeight: FontWeight.bold),
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 20),
           TextField(
             controller: _nameController,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: "Full Name",
-              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.person, color: primaryGreen),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
           ),
           const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: () {
-              if (_nameController.text.isNotEmpty) {
+          // 🟢 Shop Selection Part
+          const Text(
+            "Select Customer Shop",
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ChoiceChip(
+                label: const Text("Cassia"),
+                selected: _selectedShopForNewCustomer == "Cassia",
+                onSelected: (val) {
+                  setState(
+                    () => _selectedShopForNewCustomer = val ? "Cassia" : "",
+                  );
+                },
+              ),
+              const SizedBox(width: 15),
+              ChoiceChip(
+                label: const Text("Battistini"),
+                selected: _selectedShopForNewCustomer == "Battistini",
+                onSelected: (val) {
+                  setState(
+                    () => _selectedShopForNewCustomer = val ? "Battistini" : "",
+                  );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 25),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryGreen,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed: () {
+                if (_nameController.text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Please enter customer name")),
+                  );
+                  return;
+                }
+                if (_selectedShopForNewCustomer.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Please select a shop")),
+                  );
+                  return;
+                }
+
                 _confirmCreditOrder({
                   'name': _nameController.text,
                   'phone': _searchController.text,
                   'total_debt': 0,
                   'credit_limit': 50,
+                  'shop':
+                      _selectedShopForNewCustomer, // 🟢 තේරූ Shop එක Firestore යැවීම
                 }, _searchController.text);
-              }
-            },
-            child: const Text("Record New User"),
+              },
+              child: const Text(
+                "Record New User",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
           ),
         ],
       ),
