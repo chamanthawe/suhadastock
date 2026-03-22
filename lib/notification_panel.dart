@@ -1,3 +1,5 @@
+import 'dart:convert'; // Base64 image පෙන්වීමට අවශ්‍යයි
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -8,11 +10,11 @@ class NotificationPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // වර්ණ සංකලනය
     final Color primaryGreen = const Color(0xFF1B5E20);
     final Color secondaryGreen = const Color(0xFF2E7D32);
     final Color accentOrange = const Color(0xFFFF8F00);
     final Color creditRed = const Color(0xFFD32F2F);
+    final Color billGreen = const Color(0xFF2E7D32); // බිල් සඳහා කොළ පාට
 
     return Scaffold(
       backgroundColor: const Color(0xFFF1F5F1),
@@ -97,8 +99,9 @@ class NotificationPanel extends StatelessWidget {
               var doc = snapshot.data!.docs[index];
               var data = doc.data() as Map<String, dynamic>;
 
-              // Notification වර්ගය හඳුනාගැනීම
+              // Notification වර්ග හඳුනාගැනීම
               bool isCredit = data['type'] == 'credit_order';
+              bool isBill = data['type'] == 'bill_entry'; // 👈 නව බිල් වර්ගය
 
               DateTime? date = (data['timestamp'] as Timestamp?)?.toDate();
               String timeStr = date != null
@@ -144,10 +147,12 @@ class NotificationPanel extends StatelessWidget {
                     child: IntrinsicHeight(
                       child: Row(
                         children: [
-                          // වම් පැත්තේ ඇති පාට තීරුව
+                          // වම් පැත්තේ වර්ණ තීරුව
                           Container(
                             width: 6,
-                            color: isCredit ? creditRed : accentOrange,
+                            color: isCredit
+                                ? creditRed
+                                : (isBill ? billGreen : accentOrange),
                           ),
 
                           // Image හෝ Icon Section
@@ -163,34 +168,14 @@ class NotificationPanel extends StatelessWidget {
                                   color: Colors.grey.withValues(alpha: 0.2),
                                 ),
                               ),
-                              child:
-                                  data['imageUrl'] != null &&
-                                      data['imageUrl'] != ""
-                                  ? ClipRRect(
-                                      borderRadius: BorderRadius.circular(10),
-                                      child: CachedNetworkImage(
-                                        imageUrl: data['imageUrl'],
-                                        fit: BoxFit.cover,
-                                        errorWidget: (context, url, error) =>
-                                            Icon(
-                                              isCredit
-                                                  ? Icons.person
-                                                  : Icons.inventory,
-                                              color: isCredit
-                                                  ? creditRed
-                                                  : primaryGreen,
-                                            ),
-                                      ),
-                                    )
-                                  : Icon(
-                                      isCredit
-                                          ? Icons.account_balance_wallet_rounded
-                                          : Icons.inventory_2_rounded,
-                                      color: isCredit
-                                          ? creditRed
-                                          : primaryGreen,
-                                      size: 30,
-                                    ),
+                              child: _buildNotificationIcon(
+                                data,
+                                isCredit,
+                                isBill,
+                                creditRed,
+                                primaryGreen,
+                                billGreen,
+                              ),
                             ),
                           ),
 
@@ -206,7 +191,10 @@ class NotificationPanel extends StatelessWidget {
                                   Text(
                                     isCredit
                                         ? "New Credit Order"
-                                        : (data['productName'] ?? "Unknown"),
+                                        : (isBill
+                                              ? "Bill: ${data['bill_name']}"
+                                              : (data['productName'] ??
+                                                    "Unknown")),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
@@ -214,15 +202,14 @@ class NotificationPanel extends StatelessWidget {
                                       fontSize: 16,
                                       color: isCredit
                                           ? creditRed
-                                          : primaryGreen,
+                                          : (isBill ? billGreen : primaryGreen),
                                     ),
                                   ),
 
-                                  // Credit Order එකක් නම් Customer Name පෙන්වීම
                                   if (isCredit) ...[
                                     const SizedBox(height: 2),
                                     Text(
-                                      "Customer: ${data['name'] ?? 'Unknown'}", // Firestore එකේ තියෙන්නෙ 'name'
+                                      "Customer: ${data['name'] ?? 'Unknown'}",
                                       style: TextStyle(
                                         fontSize: 13,
                                         fontWeight: FontWeight.w600,
@@ -242,19 +229,25 @@ class NotificationPanel extends StatelessWidget {
                                         decoration: BoxDecoration(
                                           color: isCredit
                                               ? Colors.red[50]
-                                              : Colors.orange[50],
+                                              : (isBill
+                                                    ? Colors.green[50]
+                                                    : Colors.orange[50]),
                                           borderRadius: BorderRadius.circular(
                                             6,
                                           ),
                                         ),
                                         child: Text(
                                           isCredit
-                                              ? "Amount: €${data['last_order_amount'] ?? '0.00'}" // Firestore එකේ තියෙන්නෙ 'last_order_amount'
-                                              : "Stock: ${data['remainingStock'] ?? '0'}",
+                                              ? "Amount: €${data['last_order_amount'] ?? '0.00'}"
+                                              : (isBill
+                                                    ? "Paid: €${data['amount'] ?? '0.00'}"
+                                                    : "Stock: ${data['remainingStock'] ?? '0'}"),
                                           style: TextStyle(
                                             color: isCredit
                                                 ? creditRed
-                                                : Colors.red,
+                                                : (isBill
+                                                      ? billGreen
+                                                      : Colors.red),
                                             fontWeight: FontWeight.bold,
                                             fontSize: 12,
                                           ),
@@ -274,7 +267,6 @@ class NotificationPanel extends StatelessWidget {
                                     ],
                                   ),
                                   const SizedBox(height: 4),
-                                  // Date සහ Time
                                   Text(
                                     "$dateStr at $timeStr",
                                     style: TextStyle(
@@ -287,7 +279,6 @@ class NotificationPanel extends StatelessWidget {
                             ),
                           ),
 
-                          // ඉවත් කිරීමේ Button එක
                           IconButton(
                             icon: Icon(
                               Icons.close,
@@ -309,6 +300,49 @@ class NotificationPanel extends StatelessWidget {
     );
   }
 
+  // Icon එක හෝ Image එක තෝරාගැනීමේ Helper function එක
+  Widget _buildNotificationIcon(
+    Map<String, dynamic> data,
+    bool isCredit,
+    bool isBill,
+    Color creditRed,
+    Color primaryGreen,
+    Color billGreen,
+  ) {
+    // 1. Network Image එකක් ඇත්නම් (Stock items සඳහා)
+    if (data['imageUrl'] != null && data['imageUrl'] != "") {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: CachedNetworkImage(
+          imageUrl: data['imageUrl'],
+          fit: BoxFit.cover,
+          errorWidget: (context, url, error) => Icon(
+            isCredit ? Icons.person : Icons.inventory,
+            color: isCredit ? creditRed : primaryGreen,
+          ),
+        ),
+      );
+    }
+    // 2. Base64 Image එකක් ඇත්නම් (බිල්පත් සඳහා)
+    else if (data['image_data'] != null && data['image_data'] != "") {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.memory(
+          base64Decode(data['image_data']),
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+    // 3. කිසිවක් නැත්නම් Default Icon එක
+    return Icon(
+      isCredit
+          ? Icons.account_balance_wallet_rounded
+          : (isBill ? Icons.receipt_long_rounded : Icons.inventory_2_rounded),
+      color: isCredit ? creditRed : (isBill ? billGreen : primaryGreen),
+      size: 30,
+    );
+  }
+
   void _clearAllNotifications(BuildContext context) async {
     showDialog(
       context: context,
@@ -325,10 +359,9 @@ class NotificationPanel extends StatelessWidget {
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              var collection = FirebaseFirestore.instance.collection(
-                'notifications',
-              );
-              var snapshots = await collection.get();
+              var snapshots = await FirebaseFirestore.instance
+                  .collection('notifications')
+                  .get();
               for (var doc in snapshots.docs) {
                 await doc.reference.delete();
               }

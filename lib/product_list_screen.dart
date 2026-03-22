@@ -126,7 +126,6 @@ class _ProductListScreenState extends State<ProductListScreen>
         _fetchAllProductsInBackground();
       }
     } catch (e) {
-      // මේ විදියට block එකක් ඇතුළට දාන්න
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -291,12 +290,9 @@ class _ProductListScreenState extends State<ProductListScreen>
             ],
           ),
           actions: [
-            // --- Notification Badge with StreamBuilder (Real-time Count) ---
             StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collection('notifications')
-                  // මෙතන isRead false ඒව විතරක් ගණන් කරනවා නම් (optional)
-                  // .where('isRead', isEqualTo: false)
                   .snapshots(),
               builder: (context, snapshot) {
                 int notificationCount = 0;
@@ -316,7 +312,6 @@ class _ProductListScreenState extends State<ProductListScreen>
                         ),
                       ),
                     ),
-                    // Notification තිබේ නම් පමණක් රතු රවුම පෙන්වයි
                     if (notificationCount > 0)
                       Positioned(
                         right: 8,
@@ -326,10 +321,7 @@ class _ProductListScreenState extends State<ProductListScreen>
                           decoration: BoxDecoration(
                             color: Colors.red,
                             borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: darkGreen,
-                              width: 1,
-                            ), // AppBar එකට ගැලපෙන්න
+                            border: Border.all(color: darkGreen, width: 1),
                           ),
                           constraints: const BoxConstraints(
                             minWidth: 18,
@@ -820,6 +812,23 @@ class _ProductListScreenState extends State<ProductListScreen>
                   child: const Text("UNFOLD ADMIN PANEL"),
                 ),
                 const SizedBox(height: 20),
+                // 🔔 මෙන්න අලුතින් එකතු කරපු Button එක
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.greenAccent),
+                    foregroundColor: Colors.greenAccent,
+                    minimumSize: const Size(double.infinity, 50),
+                  ),
+                  icon: const Icon(Icons.receipt_long),
+                  label: const Text("MANAGE BILLS"),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const BillManagementScreen(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 15),
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: Colors.blueAccent),
@@ -914,7 +923,6 @@ class _ProductListScreenState extends State<ProductListScreen>
               await prefs.setString('printer_ip', _ipController.text);
               await PrinterManager.connect(_ipController.text);
 
-              // මේ line එක ඇතුළත් කරන්න
               if (!context.mounted) return;
 
               Navigator.pop(context);

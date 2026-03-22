@@ -22,6 +22,7 @@ import 'printer_manager.dart';
 import 'quick_product_grid.dart';
 import 'receipt_service.dart';
 import 'search_overlay_widget.dart';
+import 'time_sync.dart'; // ඔයා හදාගත්ත file එකේ නම
 
 List<Map<String, dynamic>> globalCart = [];
 double globalDiscount = 0;
@@ -90,6 +91,12 @@ class _OrderScreenState extends State<OrderScreen> {
   @override
   void initState() {
     super.initState();
+    TimeSync().init(
+      url: widget.baseUrl,
+      key: widget.ck,
+      secret: widget.cs,
+      shop: widget.selectedShop,
+    );
     _startConnectivityCheck();
     _startFirestoreLiveSync();
     _loadQuickProducts();
@@ -1374,6 +1381,8 @@ class _OrderScreenState extends State<OrderScreen> {
   ) async {
     final String d = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final String t = DateFormat('HH:mm').format(DateTime.now());
+
+    // 1. Firestore එකට Order එක සේව් කිරීම (දැනටමත් තියෙන එක)
     await FirebaseFirestore.instance.collection('orders').add({
       'shop': widget.selectedShop,
       'total_sales': total,
@@ -1384,6 +1393,19 @@ class _OrderScreenState extends State<OrderScreen> {
       'time': t,
       'timestamp': FieldValue.serverTimestamp(),
     });
+
+    // 2. අලුතින් එකතු කළ යුතු Background Sync කොටස
+    for (var item in items) {
+      if (item['id'].toString().contains('manual')) continue;
+
+      bool isBat = widget.selectedShop.toLowerCase().contains("battistini");
+      String targetKey = isBat ? "battistini_stock" : "cassia_stock";
+
+      // පරණ එක වෙනුවට අලුත් TimeSync එක පාවිච්චි කිරීම
+      await TimeSync().addOrder(item, (item['qty'] as num).toInt(), targetKey);
+    }
+
+    // Firebase Stock එක Update කිරීම (දැනටමත් තියෙන එක)
     _updateWooStockFast(items);
   }
 

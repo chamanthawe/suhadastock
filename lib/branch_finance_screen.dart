@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -17,6 +19,97 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
   final Color darkGreen = const Color(0xFF0D1B15);
   final Color accentGreen = const Color(0xFF00E676);
   DateTimeRange? selectedRange;
+
+  // --- Card Machine මුදල ලබාගන්නා Dialog එක ---
+  Future<void> _showCardAmountDialog(
+    List<QueryDocumentSnapshot> docs,
+    double totalSales,
+    double profit,
+    Map<String, int> topProducts,
+    double totalBills,
+  ) async {
+    final TextEditingController cardController = TextEditingController(
+      text: "0.00",
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: darkGreen,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: accentGreen.withOpacity(0.5)),
+        ),
+        title: Text(
+          "Card Machine Total",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              "Enter today's total card payments received:",
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 15),
+            TextField(
+              controller: cardController,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                prefixText: "€ ",
+                prefixStyle: TextStyle(color: accentGreen),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white24),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: accentGreen),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              "Cancel",
+              style: TextStyle(color: Colors.white54),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: accentGreen,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            onPressed: () {
+              double cardAmount = double.tryParse(cardController.text) ?? 0.0;
+              Navigator.pop(context);
+              _generatePdf(
+                docs,
+                totalSales,
+                profit,
+                topProducts,
+                totalBills,
+                cardAmount,
+              );
+            },
+            child: const Text(
+              "Generate PDF",
+              style: TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   // --- ඕඩර් එකක් Reprint කිරීමේ Logic එක ---
   Future<void> _reprintOrder(Map<String, dynamic> data, String orderId) async {
@@ -56,12 +149,14 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     await Printing.layoutPdf(onLayout: (format) async => pdf.save());
   }
 
-  // --- මුළු Report එක (Staff Total සහිතව) PDF ලෙස ලබා ගැනීම ---
+  // --- මුළු Report එක PDF ලෙස ලබා ගැනීම (Card Machine මුදල සහිතව) ---
   Future<void> _generatePdf(
     List<QueryDocumentSnapshot> docs,
-    double total,
+    double totalSales,
     double profit,
     Map<String, int> topProducts,
+    double totalBills,
+    double cardAmount,
   ) async {
     final pdf = pw.Document();
     final dateStr = DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now());
@@ -69,32 +164,28 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
         ? DateFormat('yyyy-MM-dd').format(DateTime.now())
         : "${DateFormat('yyyy-MM-dd').format(selectedRange!.start)} to ${DateFormat('yyyy-MM-dd').format(selectedRange!.end)}";
 
-    // Staff Orders ප්‍රමාණය ගණනය කිරීම
     double staffTotal = 0.0;
     try {
       var staffSnapshot = await FirebaseFirestore.instance
           .collection('staff_orders')
           .where('shop', isEqualTo: widget.branchName)
           .get();
-
       var filteredStaff = staffSnapshot.docs.where((doc) {
         String dStr = doc['date'] ?? "";
-        if (selectedRange == null) {
+        if (selectedRange == null)
           return dStr == DateFormat('yyyy-MM-dd').format(DateTime.now());
-        }
         DateTime d = DateFormat('yyyy-MM-dd').parse(dStr);
         return d.isAfter(
               selectedRange!.start.subtract(const Duration(days: 1)),
             ) &&
             d.isBefore(selectedRange!.end.add(const Duration(days: 1)));
       }).toList();
-
       for (var sDoc in filteredStaff) {
         staffTotal +=
             double.tryParse(sDoc['total_value']?.toString() ?? '0') ?? 0;
       }
     } catch (e) {
-      debugPrint("Error fetching staff orders for PDF: $e");
+      debugPrint("Error: $e");
     }
 
     pdf.addPage(
@@ -137,43 +228,25 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
             ),
             pw.SizedBox(height: 20),
 
-            // Financial Summary Table
             pw.TableHelper.fromTextArray(
               headers: ['Metric', 'Value (EUR)'],
               headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
               data: [
-                ['Total Sales', total.toStringAsFixed(2)],
-                ['Net Profit', profit.toStringAsFixed(2)],
+                ['Total Sales', totalSales.toStringAsFixed(2)],
+                ['Card Machine Total (-)', cardAmount.toStringAsFixed(2)],
+                ['Bill Expenses (-)', totalBills.toStringAsFixed(2)],
                 [
-                  'Staff Consumption',
-                  staffTotal.toStringAsFixed(2),
-                ], // Staff Total එක මෙතන තියෙනවා
+                  'Final Physical Cash Balance',
+                  (totalSales - totalBills - cardAmount).toStringAsFixed(2),
+                ],
+                ['Net Profit', profit.toStringAsFixed(2)],
+                ['Staff Consumption', staffTotal.toStringAsFixed(2)],
               ],
             ),
-
-            pw.SizedBox(height: 30),
+            pw.SizedBox(height: 20),
             pw.Text(
-              'Detailed Transactions',
-              style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
-            ),
-            pw.SizedBox(height: 10),
-            pw.TableHelper.fromTextArray(
-              headers: ['Time', 'Order ID', 'Sale Total', 'Profit'],
-              data: docs.map((doc) {
-                final data = doc.data() as Map<String, dynamic>;
-                return [
-                  data['time'] ?? 'N/A',
-                  doc.id.substring(0, 8).toUpperCase(),
-                  (double.tryParse(
-                            data['total_sales']?.toString() ??
-                                data['total']?.toString() ??
-                                '0',
-                          ) ??
-                          0)
-                      .toStringAsFixed(2),
-                  _calculateOrderProfit(data).toStringAsFixed(2),
-                ];
-              }).toList(),
+              "Note: Transaction list excluded. Card amount manually entered.",
+              style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
             ),
           ];
         },
@@ -185,9 +258,8 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
   }
 
   double _calculateOrderProfit(Map<String, dynamic> orderData) {
-    if (orderData['net_profit'] != null) {
+    if (orderData['net_profit'] != null)
       return double.tryParse(orderData['net_profit'].toString()) ?? 0.0;
-    }
     double totalProfit = 0.0;
     List items = orderData['items'] ?? [];
     for (var item in items) {
@@ -232,88 +304,130 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                   .collection('orders')
                   .where('shop', isEqualTo: widget.branchName)
                   .snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
+              builder: (context, orderSnapshot) {
+                return StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('bills')
+                      .where('shop', isEqualTo: widget.branchName)
+                      .snapshots(),
+                  builder: (context, billSnapshot) {
+                    if (!orderSnapshot.hasData || !billSnapshot.hasData)
+                      return const Center(child: CircularProgressIndicator());
 
-                var allDocs = snapshot.data!.docs;
-                var filteredDocs = allDocs.where((doc) {
-                  String dStr = doc['date'] ?? "";
-                  if (selectedRange == null) return dStr == today;
-                  DateTime d = DateFormat('yyyy-MM-dd').parse(dStr);
-                  return d.isAfter(
-                        selectedRange!.start.subtract(const Duration(days: 1)),
-                      ) &&
-                      d.isBefore(
-                        selectedRange!.end.add(const Duration(days: 1)),
-                      );
-                }).toList();
+                    var filteredOrders = orderSnapshot.data!.docs.where((doc) {
+                      String dStr = doc['date'] ?? "";
+                      if (selectedRange == null) return dStr == today;
+                      DateTime d = DateFormat('yyyy-MM-dd').parse(dStr);
+                      return d.isAfter(
+                            selectedRange!.start.subtract(
+                              const Duration(days: 1),
+                            ),
+                          ) &&
+                          d.isBefore(
+                            selectedRange!.end.add(const Duration(days: 1)),
+                          );
+                    }).toList();
 
-                filteredDocs.sort(
-                  (a, b) => (b['time'] ?? "").compareTo(a['time'] ?? ""),
-                );
+                    var filteredBills = billSnapshot.data!.docs.where((doc) {
+                      var data = doc.data() as Map<String, dynamic>;
+                      String dStr = (data['date_time'] ?? "")
+                          .split('|')[0]
+                          .trim();
+                      if (selectedRange == null) return dStr == today;
+                      DateTime d = DateFormat('yyyy-MM-dd').parse(dStr);
+                      return d.isAfter(
+                            selectedRange!.start.subtract(
+                              const Duration(days: 1),
+                            ),
+                          ) &&
+                          d.isBefore(
+                            selectedRange!.end.add(const Duration(days: 1)),
+                          );
+                    }).toList();
 
-                double grandTotal = 0.0;
-                double grandProfit = 0.0;
-                Map<String, double> salesByDate = {};
-                Map<String, int> topProducts = {};
+                    filteredOrders.sort(
+                      (a, b) => (b['time'] ?? "").compareTo(a['time'] ?? ""),
+                    );
 
-                for (var doc in filteredDocs) {
-                  var data = doc.data() as Map<String, dynamic>;
-                  double total =
-                      double.tryParse(
-                        data['total_sales']?.toString() ??
-                            data['total']?.toString() ??
-                            '0',
-                      ) ??
-                      0;
-                  grandTotal += total;
-                  grandProfit += _calculateOrderProfit(data);
-                  salesByDate[data['date']] =
-                      (salesByDate[data['date']] ?? 0) + total;
+                    double grandTotalSales = 0.0;
+                    double grandProfit = 0.0;
+                    double totalBillExpenses = 0.0;
+                    Map<String, double> salesByDate = {};
+                    Map<String, int> topProducts = {};
 
-                  List items = data['items'] ?? [];
-                  for (var i in items) {
-                    topProducts[i['name']] =
-                        (topProducts[i['name']] ?? 0) +
-                        (int.tryParse(i['qty'].toString()) ?? 1);
-                  }
-                }
+                    for (var doc in filteredOrders) {
+                      var data = doc.data() as Map<String, dynamic>;
+                      double total =
+                          double.tryParse(
+                            data['total_sales']?.toString() ??
+                                data['total']?.toString() ??
+                                '0',
+                          ) ??
+                          0;
+                      grandTotalSales += total;
+                      grandProfit += _calculateOrderProfit(data);
+                      salesByDate[data['date']] =
+                          (salesByDate[data['date']] ?? 0) + total;
+                      List items = data['items'] ?? [];
+                      for (var i in items) {
+                        topProducts[i['name']] =
+                            (topProducts[i['name']] ?? 0) +
+                            (int.tryParse(i['qty'].toString()) ?? 1);
+                      }
+                    }
+                    for (var doc in filteredBills) {
+                      var data = doc.data() as Map<String, dynamic>;
+                      totalBillExpenses +=
+                          double.tryParse(data['amount']?.toString() ?? '0') ??
+                          0;
+                    }
 
-                return CustomScrollView(
-                  physics: const BouncingScrollPhysics(),
-                  slivers: [
-                    _buildAppBar(
-                      filteredDocs,
-                      grandTotal,
-                      grandProfit,
-                      topProducts,
-                    ),
-                    SliverToBoxAdapter(
-                      child: _build3DSummary(grandTotal, grandProfit),
-                    ),
-                    if (selectedRange != null) ...[
-                      SliverToBoxAdapter(
-                        child: _buildSectionLabel(
-                          "Sales Growth (3D Perspective)",
+                    return CustomScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      slivers: [
+                        _buildAppBar(
+                          filteredOrders,
+                          grandTotalSales,
+                          grandProfit,
+                          topProducts,
+                          totalBillExpenses,
                         ),
-                      ),
-                      SliverToBoxAdapter(
-                        child: _buildCustom3DChart(salesByDate),
-                      ),
-                      SliverToBoxAdapter(
-                        child: _buildSectionLabel("Top 5 Selling Products"),
-                      ),
-                      SliverToBoxAdapter(child: _buildTop5List(topProducts)),
-                    ] else ...[
-                      SliverToBoxAdapter(
-                        child: _buildSectionLabel("Today's Live Orders"),
-                      ),
-                      _buildTodayOrdersList(filteredDocs),
-                    ],
-                    const SliverToBoxAdapter(child: SizedBox(height: 100)),
-                  ],
+                        SliverToBoxAdapter(
+                          child: Column(
+                            children: [
+                              _build3DSummary(grandTotalSales, grandProfit),
+                              _buildBillSummaryCard(
+                                totalBillExpenses,
+                                filteredBills,
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (selectedRange != null) ...[
+                          SliverToBoxAdapter(
+                            child: _buildSectionLabel(
+                              "Sales Growth (3D Perspective)",
+                            ),
+                          ),
+                          SliverToBoxAdapter(
+                            child: _buildCustom3DChart(salesByDate),
+                          ),
+                          SliverToBoxAdapter(
+                            child: _buildSectionLabel("Top 5 Selling Products"),
+                          ),
+                          SliverToBoxAdapter(
+                            child: _buildTop5List(topProducts),
+                          ),
+                        ] else ...[
+                          SliverToBoxAdapter(
+                            child: _buildSectionLabel("Today's Live Orders"),
+                          ),
+                          _buildTodayOrdersList(filteredOrders),
+                        ],
+                        const SliverToBoxAdapter(child: SizedBox(height: 100)),
+                      ],
+                    );
+                  },
                 );
               },
             ),
@@ -338,13 +452,87 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     );
   }
 
+  Widget _buildBillSummaryCard(
+    double total,
+    List<QueryDocumentSnapshot> bills,
+  ) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(25),
+        border: Border.all(color: Colors.redAccent.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "BILL EXPENSES",
+                style: TextStyle(
+                  color: Colors.redAccent,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                "Total: €${total.toStringAsFixed(2)}",
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (bills.isEmpty)
+            const Text(
+              "No bills paid today.",
+              style: TextStyle(color: Colors.white24, fontSize: 12),
+            )
+          else
+            ...bills.map((b) {
+              var data = b.data() as Map<String, dynamic>;
+              return Padding(
+                padding: const EdgeInsets.only(top: 5),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      "- ${data['bill_name'] ?? 'Bill'}",
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                    ),
+                    Text(
+                      "€${data['amount']}",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBackgroundDecor() => Positioned.fill(
     child: Container(
       decoration: BoxDecoration(
         gradient: RadialGradient(
           center: Alignment.topLeft,
           radius: 1.5,
-          colors: [accentGreen.withValues(alpha: 0.03), Colors.transparent],
+          colors: [accentGreen.withOpacity(0.03), Colors.transparent],
         ),
       ),
     ),
@@ -354,7 +542,8 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     List<QueryDocumentSnapshot> docs,
     double total,
     double profit,
-    Map<String, int> topProducts,
+    Map<String, int> top,
+    double bills,
   ) => SliverAppBar(
     backgroundColor: Colors.transparent,
     elevation: 0,
@@ -371,7 +560,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     actions: [
       IconButton(
         icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
-        onPressed: () => _generatePdf(docs, total, profit, topProducts),
+        onPressed: () => _showCardAmountDialog(docs, total, profit, top, bills),
       ),
       const SizedBox(width: 10),
     ],
@@ -400,9 +589,9 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     child: Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
+        color: color.withOpacity(0.08),
         borderRadius: BorderRadius.circular(25),
-        border: Border.all(color: color.withValues(alpha: 0.2)),
+        border: Border.all(color: color.withOpacity(0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -437,13 +626,12 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     if (sortedEntries.isEmpty) return const SizedBox();
     double maxValue = salesData.values.reduce((a, b) => a > b ? a : b);
     if (maxValue == 0) maxValue = 1;
-
     return Container(
       height: 250,
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       padding: const EdgeInsets.symmetric(vertical: 20),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.02),
+        color: Colors.white.withOpacity(0.02),
         borderRadius: BorderRadius.circular(30),
       ),
       child: SingleChildScrollView(
@@ -462,7 +650,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                     Text(
                       "€${e.value.toStringAsFixed(1)}",
                       style: TextStyle(
-                        color: accentGreen.withValues(alpha: 0.8),
+                        color: accentGreen.withOpacity(0.8),
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
                       ),
@@ -504,7 +692,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.03),
+                  color: Colors.white.withOpacity(0.03),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
@@ -552,7 +740,6 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
           ) ??
           0;
       double orderProfit = _calculateOrderProfit(data);
-
       return GestureDetector(
         onTap: () {
           showDialog(
@@ -590,7 +777,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.02),
+            color: Colors.white.withOpacity(0.02),
             borderRadius: BorderRadius.circular(15),
           ),
           child: ListTile(
@@ -658,17 +845,20 @@ class Prism3DPainter extends CustomPainter {
       ..shader = LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        colors: [baseColor, baseColor.withValues(alpha: 0.5)],
+        colors: [baseColor, baseColor.withOpacity(0.5)],
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
-    final sidePaint = Paint()..color = baseColor.withValues(alpha: 0.3);
-    final topPaint = Paint()..color = baseColor.withValues(alpha: 0.9);
+    final sidePaint = Paint()..color = baseColor.withOpacity(0.3);
+    final topPaint = Paint()..color = baseColor.withOpacity(0.9);
     canvas.drawRRect(
-      RRect.fromLTRBR(
+      RRect.fromLTRBAndCorners(
         0,
         0,
         size.width - depth,
         size.height,
-        const Radius.circular(4),
+        topLeft: const Radius.circular(4),
+        topRight: const Radius.circular(4),
+        bottomLeft: const Radius.circular(4),
+        bottomRight: const Radius.circular(4),
       ),
       mainPaint,
     );

@@ -1,10 +1,11 @@
+import 'dart:convert'; // 👈 Base64 සහ Notification දත්ත සඳහා අවශ්‍යයි
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
-import 'package:share_plus/share_plus.dart'; // optional: share කිරීමට
+import 'package:share_plus/share_plus.dart';
 
 class BillManagementScreen extends StatefulWidget {
   const BillManagementScreen({super.key});
@@ -19,7 +20,7 @@ class _BillManagementScreenState extends State<BillManagementScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white, // ⚪ Background එක White කළා
+      backgroundColor: Colors.white,
       appBar: AppBar(
         title: const Text(
           "Bill Management",
@@ -80,12 +81,12 @@ class _BillManagementScreenState extends State<BillManagementScreen> {
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child:
-                          (data['image_path'] != null &&
-                              data['image_path'] != "")
+                          (data['image_data'] != null &&
+                              data['image_data'] != "")
                           ? ClipRRect(
                               borderRadius: BorderRadius.circular(10),
-                              child: Image.file(
-                                File(data['image_path']),
+                              child: Image.memory(
+                                base64Decode(data['image_data']),
                                 fit: BoxFit.cover,
                                 errorBuilder: (c, e, s) =>
                                     Icon(Icons.receipt_long, color: darkGreen),
@@ -128,7 +129,6 @@ class _BillManagementScreenState extends State<BillManagementScreen> {
     );
   }
 
-  // 📄 Bill එකේ විස්තර සහ Image එක බැලීමට
   void _viewBillDetails(Map<String, dynamic> data, String docId) {
     showModalBottomSheet(
       context: context,
@@ -201,13 +201,13 @@ class _BillManagementScreenState extends State<BillManagementScreen> {
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
               const SizedBox(height: 10),
-              if (data['image_path'] != null && data['image_path'] != "")
+              if (data['image_data'] != null && data['image_data'] != "")
                 Column(
                   children: [
                     ClipRRect(
                       borderRadius: BorderRadius.circular(15),
-                      child: Image.file(
-                        File(data['image_path']),
+                      child: Image.memory(
+                        base64Decode(data['image_data']),
                         fit: BoxFit.contain,
                       ),
                     ),
@@ -217,17 +217,13 @@ class _BillManagementScreenState extends State<BillManagementScreen> {
                         Expanded(
                           child: ElevatedButton.icon(
                             onPressed: () {
-                              // Image එක Download කිරීමේ logic එක මෙතනට (Share කිරීම හරහා පහසුවෙන් කළ හැක)
-                              Share.shareXFiles([
-                                XFile(data['image_path']),
-                              ], text: data['bill_name']);
+                              Share.share(
+                                "Bill Name: ${data['bill_name']}\nAmount: €${data['amount']}\nShop: ${data['shop']}",
+                              );
                             },
-                            icon: const Icon(
-                              Icons.download,
-                              color: Colors.white,
-                            ),
+                            icon: const Icon(Icons.share, color: Colors.white),
                             label: const Text(
-                              "Save or Share Image",
+                              "Share Bill Info",
                               style: TextStyle(color: Colors.white),
                             ),
                             style: ElevatedButton.styleFrom(
@@ -269,7 +265,7 @@ class _BillManagementScreenState extends State<BillManagementScreen> {
   }
 }
 
-// --- ➕ බිල්පතක් ඇතුළත් කරන Screen එක ---
+// --- ➕ Add Bill Screen ---
 class AddBillScreen extends StatefulWidget {
   const AddBillScreen({super.key});
 
@@ -288,11 +284,11 @@ class _AddBillScreenState extends State<AddBillScreen> {
   File? _image;
   bool isSaving = false;
 
-  // 📸 Camera හෝ Gallery මගින් Image එකක් තෝරා ගැනීමට
   Future<void> _pickImage(ImageSource source) async {
     final picked = await ImagePicker().pickImage(
       source: source,
-      imageQuality: 70,
+      imageQuality: 20, // 👈 MB ගණන අඩු කිරීමට
+      maxWidth: 800,
     );
     if (picked != null) setState(() => _image = File(picked.path));
   }
@@ -335,8 +331,17 @@ class _AddBillScreenState extends State<AddBillScreen> {
       );
       return;
     }
+
     setState(() => isSaving = true);
+
     try {
+      String base64Image = "";
+      if (_image != null) {
+        final bytes = await _image!.readAsBytes();
+        base64Image = base64Encode(bytes);
+      }
+
+      // 1. Bill එක Save කිරීම
       await FirebaseFirestore.instance.collection('bills').add({
         'bill_name': _billNameController.text.trim(),
         'amount': _amountController.text.trim(),
@@ -345,8 +350,20 @@ class _AddBillScreenState extends State<AddBillScreen> {
         'note': _noteController.text.trim(),
         'date_time': DateFormat('yyyy-MM-dd | hh:mm a').format(DateTime.now()),
         'timestamp': FieldValue.serverTimestamp(),
-        'image_path': _image?.path ?? "",
+        'image_data': base64Image,
       });
+
+      // 2. 🔔 Notification Panel එකට Notification එකක් යැවීම
+      await FirebaseFirestore.instance.collection('notifications').add({
+        'type': 'bill_entry', // NotificationPanel එකට අවශ්‍ය type එක
+        'title': 'New Bill Added',
+        'bill_name': _billNameController.text.trim(),
+        'amount': _amountController.text.trim(),
+        'shop': selectedShop,
+        'image_data': base64Image, // Notification එකේ image එක පෙන්වීමට
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
       if (mounted) Navigator.pop(context);
     } catch (e) {
       ScaffoldMessenger.of(
