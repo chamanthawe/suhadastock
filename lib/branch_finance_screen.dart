@@ -27,6 +27,8 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     double profit,
     Map<String, int> topProducts,
     double totalBills,
+    double shortEatsExpense, // 🔥 එකතු කල නව Parameter එක
+    double shortEatsProfit, // 🔥 එකතු කල නව Parameter එක
   ) async {
     final TextEditingController cardController = TextEditingController(
       text: "0.00",
@@ -40,14 +42,14 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
           borderRadius: BorderRadius.circular(20),
           side: BorderSide(color: accentGreen.withOpacity(0.5)),
         ),
-        title: Text(
+        title: const Text(
           "Card Machine Total",
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
+            const Text(
               "Enter today's total card payments received:",
               style: TextStyle(color: Colors.white70, fontSize: 13),
             ),
@@ -60,7 +62,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                 prefixText: "€ ",
                 prefixStyle: TextStyle(color: accentGreen),
                 enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white24),
+                  borderSide: const BorderSide(color: Colors.white24),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 focusedBorder: OutlineInputBorder(
@@ -96,6 +98,8 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                 topProducts,
                 totalBills,
                 cardAmount,
+                shortEatsExpense, // 🔥
+                shortEatsProfit, // 🔥
               );
             },
             child: const Text(
@@ -149,7 +153,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     await Printing.layoutPdf(onLayout: (format) async => pdf.save());
   }
 
-  // --- මුළු Report එක PDF ලෙස ලබා ගැනීම (Card Machine මුදල සහිතව) ---
+  // --- මුළු Report එක PDF ලෙස ලබා ගැනීම (Card Machine සහ Short Eats සහිතව) ---
   Future<void> _generatePdf(
     List<QueryDocumentSnapshot> docs,
     double totalSales,
@@ -157,6 +161,8 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     Map<String, int> topProducts,
     double totalBills,
     double cardAmount,
+    double shortEatsExpense, // 🔥
+    double shortEatsProfit, // 🔥
   ) async {
     final pdf = pw.Document();
     final dateStr = DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now());
@@ -236,10 +242,18 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                 ['Card Machine Total (-)', cardAmount.toStringAsFixed(2)],
                 ['Bill Expenses (-)', totalBills.toStringAsFixed(2)],
                 [
+                  'Short Eats Supplier Payout (-)',
+                  shortEatsExpense.toStringAsFixed(2),
+                ], // 🔥
+                [
                   'Final Physical Cash Balance',
-                  (totalSales - totalBills - cardAmount).toStringAsFixed(2),
+                  (totalSales - totalBills - cardAmount - shortEatsExpense)
+                      .toStringAsFixed(2), // 🔥
                 ],
-                ['Net Profit', profit.toStringAsFixed(2)],
+                [
+                  'Net Profit (POS + ShortEats)',
+                  (profit + shortEatsProfit).toStringAsFixed(2),
+                ], // 🔥
                 ['Staff Consumption', staffTotal.toStringAsFixed(2)],
               ],
             ),
@@ -311,121 +325,204 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                       .where('shop', isEqualTo: widget.branchName)
                       .snapshots(),
                   builder: (context, billSnapshot) {
-                    if (!orderSnapshot.hasData || !billSnapshot.hasData)
-                      return const Center(child: CircularProgressIndicator());
-
-                    var filteredOrders = orderSnapshot.data!.docs.where((doc) {
-                      String dStr = doc['date'] ?? "";
-                      if (selectedRange == null) return dStr == today;
-                      DateTime d = DateFormat('yyyy-MM-dd').parse(dStr);
-                      return d.isAfter(
-                            selectedRange!.start.subtract(
-                              const Duration(days: 1),
-                            ),
-                          ) &&
-                          d.isBefore(
-                            selectedRange!.end.add(const Duration(days: 1)),
+                    return StreamBuilder<QuerySnapshot>(
+                      stream: FirebaseFirestore.instance
+                          .collection(
+                            'short_eats_settlements',
+                          ) // 🔥 නව Short eats collection එක
+                          .where('shop', isEqualTo: widget.branchName)
+                          .snapshots(),
+                      builder: (context, shortEatSnapshot) {
+                        if (!orderSnapshot.hasData ||
+                            !billSnapshot.hasData ||
+                            !shortEatSnapshot.hasData)
+                          return const Center(
+                            child: CircularProgressIndicator(),
                           );
-                    }).toList();
 
-                    var filteredBills = billSnapshot.data!.docs.where((doc) {
-                      var data = doc.data() as Map<String, dynamic>;
-                      String dStr = (data['date_time'] ?? "")
-                          .split('|')[0]
-                          .trim();
-                      if (selectedRange == null) return dStr == today;
-                      DateTime d = DateFormat('yyyy-MM-dd').parse(dStr);
-                      return d.isAfter(
-                            selectedRange!.start.subtract(
-                              const Duration(days: 1),
+                        var filteredOrders = orderSnapshot.data!.docs.where((
+                          doc,
+                        ) {
+                          String dStr = doc['date'] ?? "";
+                          if (selectedRange == null) return dStr == today;
+                          DateTime d = DateFormat('yyyy-MM-dd').parse(dStr);
+                          return d.isAfter(
+                                selectedRange!.start.subtract(
+                                  const Duration(days: 1),
+                                ),
+                              ) &&
+                              d.isBefore(
+                                selectedRange!.end.add(const Duration(days: 1)),
+                              );
+                        }).toList();
+
+                        var filteredBills = billSnapshot.data!.docs.where((
+                          doc,
+                        ) {
+                          var data = doc.data() as Map<String, dynamic>;
+                          String dStr = (data['date_time'] ?? "")
+                              .split('|')[0]
+                              .trim();
+                          if (selectedRange == null) return dStr == today;
+                          DateTime d = DateFormat('yyyy-MM-dd').parse(dStr);
+                          return d.isAfter(
+                                selectedRange!.start.subtract(
+                                  const Duration(days: 1),
+                                ),
+                              ) &&
+                              d.isBefore(
+                                selectedRange!.end.add(const Duration(days: 1)),
+                              );
+                        }).toList();
+
+                        // 🔥 Short Eats Settlements filtering logic
+                        var filteredShortEats = shortEatSnapshot.data!.docs
+                            .where((doc) {
+                              String dStr = doc['date'] ?? "";
+                              if (selectedRange == null) return dStr == today;
+                              DateTime d = DateFormat('yyyy-MM-dd').parse(dStr);
+                              return d.isAfter(
+                                    selectedRange!.start.subtract(
+                                      const Duration(days: 1),
+                                    ),
+                                  ) &&
+                                  d.isBefore(
+                                    selectedRange!.end.add(
+                                      const Duration(days: 1),
+                                    ),
+                                  );
+                            })
+                            .toList();
+
+                        filteredOrders.sort(
+                          (a, b) =>
+                              (b['time'] ?? "").compareTo(a['time'] ?? ""),
+                        );
+
+                        double grandTotalSales = 0.0;
+                        double grandProfit = 0.0;
+                        double totalBillExpenses = 0.0;
+                        double shortEatsExpense = 0.0; // 🔥
+                        double shortEatsProfit = 0.0; // 🔥
+                        Map<String, double> salesByDate = {};
+                        Map<String, int> topProducts = {};
+
+                        for (var doc in filteredOrders) {
+                          var data = doc.data() as Map<String, dynamic>;
+                          double total =
+                              double.tryParse(
+                                data['total_sales']?.toString() ??
+                                    data['total']?.toString() ??
+                                    '0',
+                              ) ??
+                              0;
+                          grandTotalSales += total;
+                          grandProfit += _calculateOrderProfit(data);
+                          salesByDate[data['date']] =
+                              (salesByDate[data['date']] ?? 0) + total;
+                          List items = data['items'] ?? [];
+                          for (var i in items) {
+                            topProducts[i['name']] =
+                                (topProducts[i['name']] ?? 0) +
+                                (int.tryParse(i['qty'].toString()) ?? 1);
+                          }
+                        }
+                        for (var doc in filteredBills) {
+                          var data = doc.data() as Map<String, dynamic>;
+                          totalBillExpenses +=
+                              double.tryParse(
+                                data['amount']?.toString() ?? '0',
+                              ) ??
+                              0;
+                        }
+
+                        // 🔥 Short Eats ගණනය කිරීම
+                        for (var doc in filteredShortEats) {
+                          var data = doc.data() as Map<String, dynamic>;
+                          List items = data['items'] ?? [];
+                          for (var item in items) {
+                            shortEatsExpense +=
+                                double.tryParse(
+                                  item['total_supplier_pay']?.toString() ?? '0',
+                                ) ??
+                                0;
+                            shortEatsProfit +=
+                                double.tryParse(
+                                  item['total_profit']?.toString() ?? '0',
+                                ) ??
+                                0;
+                          }
+                        }
+
+                        // Final Physical Cash Calculation
+                        double physicalCash =
+                            grandTotalSales -
+                            totalBillExpenses -
+                            shortEatsExpense;
+
+                        return CustomScrollView(
+                          physics: const BouncingScrollPhysics(),
+                          slivers: [
+                            _buildAppBar(
+                              filteredOrders,
+                              grandTotalSales,
+                              grandProfit +
+                                  shortEatsProfit, // 🔥 ලාභයට ShortEats එකතු කරයි
+                              topProducts,
+                              totalBillExpenses,
+                              shortEatsExpense, // 🔥
+                              shortEatsProfit, // 🔥
                             ),
-                          ) &&
-                          d.isBefore(
-                            selectedRange!.end.add(const Duration(days: 1)),
-                          );
-                    }).toList();
-
-                    filteredOrders.sort(
-                      (a, b) => (b['time'] ?? "").compareTo(a['time'] ?? ""),
-                    );
-
-                    double grandTotalSales = 0.0;
-                    double grandProfit = 0.0;
-                    double totalBillExpenses = 0.0;
-                    Map<String, double> salesByDate = {};
-                    Map<String, int> topProducts = {};
-
-                    for (var doc in filteredOrders) {
-                      var data = doc.data() as Map<String, dynamic>;
-                      double total =
-                          double.tryParse(
-                            data['total_sales']?.toString() ??
-                                data['total']?.toString() ??
-                                '0',
-                          ) ??
-                          0;
-                      grandTotalSales += total;
-                      grandProfit += _calculateOrderProfit(data);
-                      salesByDate[data['date']] =
-                          (salesByDate[data['date']] ?? 0) + total;
-                      List items = data['items'] ?? [];
-                      for (var i in items) {
-                        topProducts[i['name']] =
-                            (topProducts[i['name']] ?? 0) +
-                            (int.tryParse(i['qty'].toString()) ?? 1);
-                      }
-                    }
-                    for (var doc in filteredBills) {
-                      var data = doc.data() as Map<String, dynamic>;
-                      totalBillExpenses +=
-                          double.tryParse(data['amount']?.toString() ?? '0') ??
-                          0;
-                    }
-
-                    return CustomScrollView(
-                      physics: const BouncingScrollPhysics(),
-                      slivers: [
-                        _buildAppBar(
-                          filteredOrders,
-                          grandTotalSales,
-                          grandProfit,
-                          topProducts,
-                          totalBillExpenses,
-                        ),
-                        SliverToBoxAdapter(
-                          child: Column(
-                            children: [
-                              _build3DSummary(grandTotalSales, grandProfit),
-                              _buildBillSummaryCard(
-                                totalBillExpenses,
-                                filteredBills,
+                            SliverToBoxAdapter(
+                              child: Column(
+                                children: [
+                                  _build3DSummary(
+                                    grandTotalSales,
+                                    grandProfit + shortEatsProfit,
+                                    physicalCash,
+                                  ), // 🔥
+                                  _buildShortEatsSummaryCard(
+                                    shortEatsExpense,
+                                    shortEatsProfit,
+                                  ), // 🔥 New Section
+                                  _buildBillSummaryCard(
+                                    totalBillExpenses,
+                                    filteredBills,
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                        ),
-                        if (selectedRange != null) ...[
-                          SliverToBoxAdapter(
-                            child: _buildSectionLabel(
-                              "Sales Growth (3D Perspective)",
                             ),
-                          ),
-                          SliverToBoxAdapter(
-                            child: _buildCustom3DChart(salesByDate),
-                          ),
-                          SliverToBoxAdapter(
-                            child: _buildSectionLabel("Top 5 Selling Products"),
-                          ),
-                          SliverToBoxAdapter(
-                            child: _buildTop5List(topProducts),
-                          ),
-                        ] else ...[
-                          SliverToBoxAdapter(
-                            child: _buildSectionLabel("Today's Live Orders"),
-                          ),
-                          _buildTodayOrdersList(filteredOrders),
-                        ],
-                        const SliverToBoxAdapter(child: SizedBox(height: 100)),
-                      ],
+                            if (selectedRange != null) ...[
+                              SliverToBoxAdapter(
+                                child: _buildSectionLabel(
+                                  "Sales Growth (3D Perspective)",
+                                ),
+                              ),
+                              SliverToBoxAdapter(
+                                child: _buildCustom3DChart(salesByDate),
+                              ),
+                              SliverToBoxAdapter(
+                                child: _buildSectionLabel(
+                                  "Top 5 Selling Products",
+                                ),
+                              ),
+                              SliverToBoxAdapter(
+                                child: _buildTop5List(topProducts),
+                              ),
+                            ] else ...[
+                              SliverToBoxAdapter(
+                                child: _buildSectionLabel(
+                                  "Today's Live Orders",
+                                ),
+                              ),
+                              _buildTodayOrdersList(filteredOrders),
+                            ],
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 100),
+                            ),
+                          ],
+                        );
+                      },
                     );
                   },
                 );
@@ -448,6 +545,63 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
+      ),
+    );
+  }
+
+  // 🔥 Short Eats සාරාංශ පුවරුව
+  Widget _buildShortEatsSummaryCard(double expense, double profit) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(25),
+        border: Border.all(color: accentGreen.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                "SHORT EATS CONSIGNMENTS",
+                style: TextStyle(
+                  color: accentGreen,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                "Net Profit: €${profit.toStringAsFixed(2)}",
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "Supplier Payout (Out):",
+                style: TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              Text(
+                "€${expense.toStringAsFixed(2)}",
+                style: const TextStyle(
+                  color: Colors.redAccent,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -544,6 +698,8 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     double profit,
     Map<String, int> top,
     double bills,
+    double shortEatsExpense, // 🔥
+    double shortEatsProfit, // 🔥
   ) => SliverAppBar(
     backgroundColor: Colors.transparent,
     elevation: 0,
@@ -560,30 +716,53 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     actions: [
       IconButton(
         icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
-        onPressed: () => _showCardAmountDialog(docs, total, profit, top, bills),
+        onPressed: () => _showCardAmountDialog(
+          docs,
+          total,
+          profit,
+          top,
+          bills,
+          shortEatsExpense,
+          shortEatsProfit,
+        ), // 🔥
       ),
       const SizedBox(width: 10),
     ],
   );
 
-  Widget _build3DSummary(double total, double profit) => Padding(
-    padding: const EdgeInsets.all(20),
-    child: Row(
-      children: [
-        _summaryCard(
-          "TOTAL SALES",
-          "€${total.toStringAsFixed(2)}",
-          Colors.blueAccent,
+  Widget _build3DSummary(double total, double profit, double physicalCash) =>
+      Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                _summaryCard(
+                  "TOTAL SALES",
+                  "€${total.toStringAsFixed(2)}",
+                  Colors.blueAccent,
+                ),
+                const SizedBox(width: 15),
+                _summaryCard(
+                  "NET PROFIT",
+                  "€${profit.toStringAsFixed(2)}",
+                  accentGreen,
+                ),
+              ],
+            ),
+            const SizedBox(height: 15),
+            Row(
+              children: [
+                _summaryCard(
+                  "PHYSICAL CASH BALANCE",
+                  "€${physicalCash.toStringAsFixed(2)}",
+                  Colors.orangeAccent,
+                ),
+              ],
+            ),
+          ],
         ),
-        const SizedBox(width: 15),
-        _summaryCard(
-          "NET PROFIT",
-          "€${profit.toStringAsFixed(2)}",
-          accentGreen,
-        ),
-      ],
-    ),
-  );
+      );
 
   Widget _summaryCard(String title, String value, Color color) => Expanded(
     child: Container(

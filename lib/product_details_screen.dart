@@ -35,6 +35,15 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   bool isUpdating = false;
   bool isLooseProduct = false; // Loose (Kg) ද යන්න හඳුනා ගැනීමට
 
+  // 🔥 Short Eats Tracking Variable
+  bool isShortEat = false;
+
+  // 🔥 Case Management Variables
+  bool isCaseProduct = false;
+  String linkedSingleProductId = "";
+  String linkedSingleProductName = "";
+  late TextEditingController _itemsPerCaseController;
+
   @override
   void initState() {
     super.initState();
@@ -56,6 +65,8 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     _battistiniStockController = TextEditingController(
       text: _getMetaValue(meta, 'battistini_stock', defaultValue: "0"),
     );
+
+    _itemsPerCaseController = TextEditingController(text: "12"); // Default
 
     _taxController.text = _getMetaValue(meta, 'tax_rate', defaultValue: "10");
 
@@ -98,6 +109,16 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
           _cassiaStockController.text = data['cassia_stock']?.toString() ?? "0";
           _battistiniStockController.text =
               data['battistini_stock']?.toString() ?? "0";
+
+          // 🔐 Load Case Data
+          isCaseProduct = data['is_case_product'] ?? false;
+          linkedSingleProductId = data['linked_single_product_id'] ?? "";
+          linkedSingleProductName = data['linked_single_product_name'] ?? "";
+          _itemsPerCaseController.text = (data['items_per_case'] ?? 12)
+              .toString();
+
+          // 🍔 Load Short Eats Data
+          isShortEat = data['is_short_eat'] ?? false;
         });
       }
     } catch (e) {
@@ -118,6 +139,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     _costController.dispose();
     _taxController.dispose();
     _profitAmountController.dispose();
+    _itemsPerCaseController.dispose();
     super.dispose();
   }
 
@@ -255,6 +277,15 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
             'battistini_stock': battistiniStockValue,
             'is_loose': isLooseProduct,
             'last_updated': FieldValue.serverTimestamp(),
+
+            // 🍔 Short Eat Persistence
+            'is_short_eat': isShortEat,
+
+            // 🛠️ Case Management Persistence
+            'is_case_product': isCaseProduct,
+            'linked_single_product_id': linkedSingleProductId,
+            'linked_single_product_name': linkedSingleProductName,
+            'items_per_case': int.tryParse(_itemsPerCaseController.text) ?? 12,
           }, SetOptions(merge: true));
 
       // 2. WooCommerce Sync
@@ -271,6 +302,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
           {"key": "tax_rate", "value": _taxController.text},
           {"key": "profit", "value": _profitAmountController.text},
           {"key": "is_loose", "value": isLooseProduct ? "yes" : "no"},
+          {"key": "is_case_product", "value": isCaseProduct ? "yes" : "no"},
         ],
       };
 
@@ -294,10 +326,30 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             backgroundColor: Colors.green,
-            content: Text("Success! 3rd Decimal Sync Completed."),
+            content: Text("Success! Sync Completed."),
           ),
         );
-        Navigator.pop(context, true);
+        Navigator.pop(context, {
+          ...widget.product, // පරණ දත්ත ඔක්කොම ගන්නවා
+          'name': _nameController.text,
+          'sku': _skuController.text.trim(),
+          'stock_quantity': isLooseProduct
+              ? double.parse(_cassiaStockController.text)
+              : int.parse(_cassiaStockController.text),
+          'meta_data': [
+            ...widget.product['meta_data'] ?? [], // පරණ meta දත්ත
+            {'key': 'shop_price', 'value': _shopPriceController.text},
+            {'key': 'cassia_stock', 'value': _cassiaStockController.text},
+            {
+              'key': 'battistini_stock',
+              'value': _battistiniStockController.text,
+            },
+            {'key': 'is_case_product', 'value': isCaseProduct ? 'yes' : 'no'},
+            {'key': 'cost_price', 'value': _costController.text},
+            {'key': 'tax_rate', 'value': _taxController.text},
+            {'key': 'profit', 'value': _profitAmountController.text},
+          ],
+        });
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Failed: ${response.statusCode}")),
@@ -310,6 +362,90 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     } finally {
       if (mounted) setState(() => isUpdating = false);
     }
+  }
+
+  // 🔥 Case Picker Model UI
+  void _openSingleProductSearchPicker() {
+    String searchQuery = "";
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => SizedBox(
+          height: MediaQuery.of(context).size.height * 0.8,
+          child: Column(
+            children: [
+              const SizedBox(height: 10),
+              Container(
+                width: 40,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: "Search Single Product Name...",
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onChanged: (val) => setModalState(() => searchQuery = val),
+                ),
+              ),
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('products_data')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    final docs = snapshot.data!.docs.where((doc) {
+                      final data = doc.data() as Map<String, dynamic>;
+                      final name = data['name']?.toString().toLowerCase() ?? "";
+                      return name.contains(searchQuery.toLowerCase());
+                    }).toList();
+
+                    if (docs.isEmpty) {
+                      return const Center(child: Text("No products found"));
+                    }
+
+                    return ListView.builder(
+                      itemCount: docs.length,
+                      itemBuilder: (context, index) {
+                        final doc = docs[index];
+                        final data = doc.data() as Map<String, dynamic>;
+                        return ListTile(
+                          title: Text(data['name'] ?? "Unknown"),
+                          subtitle: Text("ID: ${doc.id}"),
+                          onTap: () {
+                            setState(() {
+                              linkedSingleProductId = doc.id;
+                              linkedSingleProductName = data['name'] ?? "";
+                            });
+                            Navigator.pop(context);
+                          },
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -356,9 +492,93 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                       ),
                       value: isLooseProduct,
                       activeColor: darkGreen,
-                      onChanged: (val) => setState(() => isLooseProduct = val),
+                      onChanged: (val) {
+                        setState(() {
+                          isLooseProduct = val;
+
+                          // Switch එක OFF කරපු ගමන් දැනට තියෙන දශම අයින් කරනවා
+                          if (!val) {
+                            double currentVal =
+                                double.tryParse(_cassiaStockController.text) ??
+                                0.0;
+                            _cassiaStockController.text = currentVal
+                                .toInt()
+                                .toString();
+
+                            double currentBVal =
+                                double.tryParse(
+                                  _battistiniStockController.text,
+                                ) ??
+                                0.0;
+                            _battistiniStockController.text = currentBVal
+                                .toInt()
+                                .toString();
+                          }
+                        });
+                      },
+                    ),
+
+                    // 🔥 🍔 Short Eats Switch (Added Area)
+                    SwitchListTile(
+                      title: const Text(
+                        "Is this a Short Eat?",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: const Text("Tag this product as short eat"),
+                      value: isShortEat,
+                      activeColor: darkGreen,
+                      onChanged: (val) => setState(() => isShortEat = val),
                     ),
                   ]),
+
+                  // 🔥 🛠️ Case Management Card (Added Section)
+                  _buildCard("CASE TO SINGLE PRODUCT MAPPING", [
+                    SwitchListTile(
+                      title: const Text(
+                        "Is this a Case / Pack Product?",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: const Text(
+                        "Mark if you break this to sell single items",
+                      ),
+                      value: isCaseProduct,
+                      activeColor: darkGreen,
+                      onChanged: (val) => setState(() => isCaseProduct = val),
+                    ),
+                    if (isCaseProduct) ...[
+                      const SizedBox(height: 10),
+                      ListTile(
+                        leading: Icon(Icons.link, color: darkGreen),
+                        title: Text(
+                          linkedSingleProductId.isEmpty
+                              ? "No Single Product Linked"
+                              : linkedSingleProductName,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(
+                          linkedSingleProductId.isEmpty
+                              ? "Tap search to link an item"
+                              : "Product ID: $linkedSingleProductId",
+                        ),
+                        trailing: IconButton(
+                          icon: Icon(Icons.search, color: darkGreen),
+                          onPressed: _openSingleProductSearchPicker,
+                        ),
+                        tileColor: Colors.grey[100],
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      const SizedBox(height: 15),
+                      _buildTextField(
+                        _itemsPerCaseController,
+                        "Items per Case",
+                        Icons.exposure_plus_1,
+                        isNumber: true,
+                      ),
+                    ],
+                  ]),
+
                   _buildCard(
                     "STOCK CONTROL (${isLooseProduct ? 'Kg' : 'Qty'})",
                     [

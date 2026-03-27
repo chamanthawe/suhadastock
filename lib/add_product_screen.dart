@@ -1,9 +1,11 @@
-import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'dart:io';
-import 'package:http/http.dart' as http;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+
 import 'constants.dart';
 
 class AddProductScreen extends StatefulWidget {

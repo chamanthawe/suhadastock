@@ -14,6 +14,7 @@ import 'action_buttons_grid.dart';
 // Imports
 import 'after_pay_screen.dart';
 import 'calculator_screen.dart';
+import 'case_management_service.dart'; // 🔥 අලුතින් හදාගත් Case Management Service එක
 import 'low_stock_alert_widget.dart';
 import 'offline_overlay_widget.dart';
 import 'orderscreen_setting.dart';
@@ -87,6 +88,11 @@ class _OrderScreenState extends State<OrderScreen> {
   final Color primaryGreen = const Color(0xFF2E7D32);
   final Color accentGreen = const Color(0xFF43A047);
   final Color lightGreenBg = const Color(0xFFF1F8E9);
+
+  // 🔥 1. Case Management Variables
+  bool _showCaseBreakButton = false;
+  Map<String, dynamic>? _detectedCaseProduct;
+  final CaseManagementService _caseService = CaseManagementService();
 
   @override
   void initState() {
@@ -188,6 +194,12 @@ class _OrderScreenState extends State<OrderScreen> {
               'battistini_stock': data['battistini_stock'] ?? 0,
               'cassia_stock': data['cassia_stock'] ?? 0,
               'image': data['image'] ?? "",
+
+              // 🔥 2. Case Management Fields Sync from Firestore
+              'is_case_product': data['is_case_product'] ?? false,
+              'linked_single_product_id':
+                  data['linked_single_product_id'] ?? "",
+              'items_per_case': data['items_per_case'] ?? 12,
             };
             if (productInfo['sku'] != "") {
               tempMap[productInfo['sku']!] = productInfo;
@@ -320,6 +332,10 @@ class _OrderScreenState extends State<OrderScreen> {
           ),
         ),
 
+        // 🔥 Creative & Bigger Glassmorphism Case Break Notification 📦
+        if (_showCaseBreakButton && _detectedCaseProduct != null)
+          _buildCreativeCaseOverlay(),
+
         if (!_isOnline)
           OfflineOverlayWidget(
             isChecking: _isCheckingConnectivity,
@@ -346,6 +362,124 @@ class _OrderScreenState extends State<OrderScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  // 🔥 Creative & Glassmorphism Case Break Notification Widget
+  Widget _buildCreativeCaseOverlay() {
+    return Positioned(
+      bottom: 110,
+      left: 20,
+      right: 20,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(25),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+            decoration: BoxDecoration(
+              color: Colors.orange[800]!.withValues(alpha: 0.85),
+              borderRadius: BorderRadius.circular(25),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.3),
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.3),
+                  blurRadius: 15,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.25),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.unarchive_rounded,
+                    color: Colors.white,
+                    size: 32,
+                  ),
+                ),
+                const SizedBox(width: 15),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        "CASE PRODUCT DETECTED!",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16,
+                          letterSpacing: 1.1,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        "${_detectedCaseProduct!['name']}",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w500,
+                          fontSize: 14,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                ElevatedButton(
+                  onPressed: _handleCaseBreakAndMove,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.orange[800],
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 14,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    elevation: 5,
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.broken_image_outlined, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        "BREAK CASE",
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white70),
+                  onPressed: () {
+                    setState(() {
+                      _showCaseBreakButton = false;
+                      _detectedCaseProduct = null;
+                    });
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -451,6 +585,78 @@ class _OrderScreenState extends State<OrderScreen> {
         Expanded(flex: 4, child: _buildCalculatorSection()),
       ],
     );
+  }
+
+  // 🔥 Handling Case Break Stock Transfers
+  Future<void> _handleCaseBreakAndMove() async {
+    if (_detectedCaseProduct == null) return;
+
+    String caseId = _detectedCaseProduct!['id'].toString();
+
+    // 🚀 1. WooCommerce එකෙන් නෙවෙයි, Firestore Live Cache එකෙන් දත්ත කියවීම (Duplicate Fix)
+    var liveData = _localProductCache[caseId] ?? _detectedCaseProduct!;
+
+    String singleId = liveData['linked_single_product_id'].toString();
+    int itemsPerCase = liveData['items_per_case'] ?? 12;
+
+    if (singleId.isEmpty || singleId == "null") {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("No Single Product linked to this Case!"),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    String activeBranch =
+        widget.selectedShop.toLowerCase().contains("battistini")
+        ? "battistini"
+        : "cassia";
+
+    int liveStock = _getLiveStockFromCache(liveData);
+
+    if (liveStock < 1) {
+      _playErrorSound();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("හදිසි දැනුම්දීමයි: Case Stock අවසන්!"),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    bool success = await _caseService.breakCaseToSingleUnits(
+      caseProductId: caseId,
+      singleProductId: singleId,
+      itemsPerCase: itemsPerCase,
+      branch: activeBranch,
+    );
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Case Broken! Moved $itemsPerCase items to Single Product.",
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+      setState(() {
+        _showCaseBreakButton = false;
+        _detectedCaseProduct = null;
+      });
+    } else {
+      _playErrorSound();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Could not break case. Out of stock?"),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+    _barcodeFocusNode.requestFocus();
   }
 
   void _handleBarcodeScan(String barcode) async {
@@ -697,7 +903,7 @@ class _OrderScreenState extends State<OrderScreen> {
     }
   }
 
-  // --- අලුතින් යාවත්කාලීන කළ addToCart ---
+  // 🔥 Universal addToCart with Case Detection (Scan, Search, Grid)
   Future<void> _addToCart(String name, dynamic p) async {
     if (p == null) return;
     int liveStock = _getLiveStockFromCache(p);
@@ -725,7 +931,6 @@ class _OrderScreenState extends State<OrderScreen> {
         double.tryParse(cached?['discount_price']?.toString() ?? "0.0") ?? 0.0;
     double unitPrice = (discountPrice > 0) ? discountPrice : normalPrice;
 
-    // --- Image URL එක නිවැරදිව ලබා ගැනීම (WooCommerce API හෝ Cache එකෙන්) ---
     String imgURL = "";
     if (p['images'] != null && (p['images'] as List).isNotEmpty) {
       imgURL = p['images'][0]['src'].toString();
@@ -755,22 +960,40 @@ class _OrderScreenState extends State<OrderScreen> {
           'isWeighted': isWeighted,
           'sku': p['sku'],
           'manage_stock': true,
-          'image': imgURL, // Cart එකටත් image එක දාගන්නවා
+          'image': imgURL,
         });
+      }
+
+      // 🔥 💡 Universal Case Detection Logic (Search & Quick Grid වලටත් වැඩ)
+      bool isCase = false;
+      String pId = p['id'].toString();
+
+      // Firestore Cache එකේ තියෙන Live දත්තම චෙක් කරනවා
+      if (_localProductCache.containsKey(pId)) {
+        isCase = _localProductCache[pId]!['is_case_product'] == true;
+      } else {
+        isCase = p['is_case_product'] == true;
+      }
+
+      if (isCase) {
+        _showCaseBreakButton = true;
+        _detectedCaseProduct =
+            _localProductCache[pId] ?? p; // Live දත්තම Assign කරනවා
+      } else {
+        _showCaseBreakButton = false;
+        _detectedCaseProduct = null;
       }
 
       int updatedStockAfterAdd = liveStock - (qtyInCart + inputQty).toInt();
 
-      // Low Stock Alert පෙන්වීම සහ Notification යැවීම
       if (updatedStockAfterAdd <= 15 && updatedStockAfterAdd >= 0) {
         _lowStockProduct = {
           'id': p['id'].toString(),
           'name': name,
-          'image': imgURL, // Alert Widget එකට දැන් image එක ලැබෙනවා
+          'image': imgURL,
         };
         _lowStockValue = updatedStockAfterAdd;
 
-        // Notification Panel එක සඳහා Firestore වෙත දත්ත යැවීම
         _sendLowStockNotification(
           p['id'].toString(),
           name,
@@ -787,7 +1010,6 @@ class _OrderScreenState extends State<OrderScreen> {
     _barcodeFocusNode.requestFocus();
   }
 
-  // Notification Firestore වෙත යවන Function එක
   Future<void> _sendLowStockNotification(
     String productId,
     String name,
@@ -795,7 +1017,6 @@ class _OrderScreenState extends State<OrderScreen> {
     String imageUrl,
   ) async {
     try {
-      // එකම Product එකට දවස් ගාණක් alerts වැටෙන එක නතර කරන්න මෙතන doc id එක විදියට productId පාවිච්චි කළා
       await FirebaseFirestore.instance
           .collection('notifications')
           .doc(productId)
@@ -808,7 +1029,7 @@ class _OrderScreenState extends State<OrderScreen> {
             'timestamp': FieldValue.serverTimestamp(),
             'isRead': false,
             'message': '$name ඉතිරිව ඇත්තේ $stock පමණි',
-          }, SetOptions(merge: true)); // කලින් තිබ්බ එක update වෙන විදියට
+          }, SetOptions(merge: true));
     } catch (e) {
       debugPrint("Notification Error: $e");
     }
@@ -1382,7 +1603,6 @@ class _OrderScreenState extends State<OrderScreen> {
     final String d = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final String t = DateFormat('HH:mm').format(DateTime.now());
 
-    // 1. Firestore එකට Order එක සේව් කිරීම (දැනටමත් තියෙන එක)
     await FirebaseFirestore.instance.collection('orders').add({
       'shop': widget.selectedShop,
       'total_sales': total,
@@ -1394,18 +1614,15 @@ class _OrderScreenState extends State<OrderScreen> {
       'timestamp': FieldValue.serverTimestamp(),
     });
 
-    // 2. අලුතින් එකතු කළ යුතු Background Sync කොටස
     for (var item in items) {
       if (item['id'].toString().contains('manual')) continue;
 
       bool isBat = widget.selectedShop.toLowerCase().contains("battistini");
       String targetKey = isBat ? "battistini_stock" : "cassia_stock";
 
-      // පරණ එක වෙනුවට අලුත් TimeSync එක පාවිච්චි කිරීම
       await TimeSync().addOrder(item, (item['qty'] as num).toInt(), targetKey);
     }
 
-    // Firebase Stock එක Update කිරීම (දැනටමත් තියෙන එක)
     _updateWooStockFast(items);
   }
 
@@ -1438,6 +1655,9 @@ class _OrderScreenState extends State<OrderScreen> {
       totalProfit = 0;
       totalValue = 0;
       _lowStockProduct = null;
+      _showCaseBreakButton =
+          false; // 🔥 Order එක reset වන විට Button එක Hide කිරීම
+      _detectedCaseProduct = null;
     });
 
     ScaffoldMessenger.of(context).showSnackBar(

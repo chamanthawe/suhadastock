@@ -1,12 +1,16 @@
-import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:firebase_database/firebase_database.dart'; // Firebase Realtime Database
+
+import 'package:cloud_firestore/cloud_firestore.dart'; // Firestore (For Live product stock)
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_database/firebase_database.dart'; // Realtime DB (For Order tracking)
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // 🔥 For saving cart state
+
 import 'constants.dart';
 
 class OrderRequestScreen extends StatefulWidget {
@@ -18,9 +22,9 @@ class OrderRequestScreen extends StatefulWidget {
 }
 
 class _OrderRequestScreenState extends State<OrderRequestScreen> {
-  // --- Theme Color ---
   final Color darkGreen = const Color(0xFF1B5E20);
 
+  // Realtime Database reference for orders
   final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
     app: Firebase.app(),
     databaseURL:
@@ -37,6 +41,7 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
   @override
   void initState() {
     super.initState();
+    _loadSavedCart(); // 🔥 Load cart when screen starts
     _listenToOrders();
   }
 
@@ -46,7 +51,32 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
     super.dispose();
   }
 
-  // --- පවතින Logic (අත නොතබන ලදී) ---
+  // 🔥 💾 Cart එක Save කරන Function එක
+  Future<void> _saveCart() async {
+    final prefs = await SharedPreferences.getInstance();
+    String encodedCart = json.encode(currentCart);
+    await prefs.setString('saved_order_cart', encodedCart);
+  }
+
+  // 🔥 📂 Save උන Cart එක Load කරන Function එක
+  Future<void> _loadSavedCart() async {
+    final prefs = await SharedPreferences.getInstance();
+    String? encodedCart = prefs.getString('saved_order_cart');
+    if (encodedCart != null && encodedCart.isNotEmpty) {
+      setState(() {
+        currentCart = List<Map<String, dynamic>>.from(json.decode(encodedCart));
+      });
+    }
+  }
+
+  // 🔥 🗑️ Cart එක සම්පූර්ණයෙන්ම Clear කරන Function එක
+  Future<void> _clearCart() async {
+    setState(() {
+      currentCart.clear();
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('saved_order_cart');
+  }
 
   void _listenToOrders() {
     _dbRef.onValue.listen((event) {
@@ -75,6 +105,7 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
     });
   }
 
+  // 🔥 1. ඉල්ලීම Cloud එකට යැවීම
   Future<void> _submitToFirebase() async {
     if (currentCart.isEmpty) return;
 
@@ -93,9 +124,8 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
       await _showPdfPreview(newOrder['items'], orderId);
 
       if (!mounted) return;
-      setState(() {
-        currentCart.clear();
-      });
+
+      await _clearCart(); // Clear cart from memory and SharedPreferences
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -114,6 +144,7 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
     }
   }
 
+  // 🔥 2. Cassia එකෙන් බඩු ලැබුණාම Battistini එකෙන් Confirm කිරීම සහ Stock Sync කිරීම
   Future<void> _completeAndSyncStock(int index) async {
     if (isSyncing) return;
     setState(() => isSyncing = true);
@@ -123,35 +154,52 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
 
     try {
       for (var item in order['items']) {
-        final url =
-            "${AppConstants.baseUrl}/products/${item['id']}?consumer_key=${AppConstants.ck}&consumer_secret=${AppConstants.cs}";
+        String productId = item['id'].toString();
+        double requestedQty = double.tryParse(item['qty'].toString()) ?? 0.0;
 
-        final response = await http.get(Uri.parse(url));
-        final pData = json.decode(response.body);
+        if (requestedQty <= 0) continue;
 
-        List meta = pData['meta_data'] ?? [];
-        var bMeta = meta.firstWhere(
-          (m) => m['key'] == 'battistini_stock',
-          orElse: () => {'value': '0'},
-        );
+        // 🟢 2.1 Firestore එකෙන් දැනට තියෙන Live Stock කියවීම
+        final docRef = FirebaseFirestore.instance
+            .collection('products_data')
+            .doc(productId);
+        final docSnap = await docRef.get();
 
-        int currentCS =
-            int.tryParse(pData['stock_quantity']?.toString() ?? '0') ?? 0;
-        int currentBS = int.tryParse(bMeta['value'].toString()) ?? 0;
+        if (!docSnap.exists) continue;
 
-        int finalCS = currentCS - (item['qty'] as int);
-        int finalBS = currentBS + (item['qty'] as int);
+        final data = docSnap.data()!;
+        double currentCassia =
+            double.tryParse(data['cassia_stock']?.toString() ?? '0') ?? 0.0;
+        double currentBattistini =
+            double.tryParse(data['battistini_stock']?.toString() ?? '0') ?? 0.0;
+
+        // 🟢 2.2 ගණනය කිරීම (Cassia අඩු වෙනවා, Battistini වැඩි වෙනවා)
+        double finalCassia = currentCassia - requestedQty;
+        double finalBattistini = currentBattistini + requestedQty;
+
+        // 🟢 2.3 WooCommerce යාවත්කාලීන කිරීම
+        final wooUrl =
+            "${AppConstants.baseUrl}/products/$productId?consumer_key=${AppConstants.ck}&consumer_secret=${AppConstants.cs}";
 
         await http.put(
-          Uri.parse(url),
+          Uri.parse(wooUrl),
           headers: {"Content-Type": "application/json"},
           body: json.encode({
-            "stock_quantity": finalCS,
+            "stock_quantity": finalCassia
+                .toInt(), // WooCommerce Main Stock (Cassia)
             "meta_data": [
-              {"key": "battistini_stock", "value": finalBS.toString()},
+              {"key": "battistini_stock", "value": finalBattistini.toString()},
+              {"key": "cassia_stock", "value": finalCassia.toString()},
             ],
           }),
         );
+
+        // 🟢 2.4 Firestore Live Stock යාවත්කාලීන කිරීම
+        await docRef.update({
+          'cassia_stock': finalCassia,
+          'battistini_stock': finalBattistini,
+          'last_updated': FieldValue.serverTimestamp(),
+        });
       }
 
       await _dbRef.child(orderId).update({'status': 'Completed'});
@@ -159,7 +207,9 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Stock Updated in WooCommerce!"),
+          content: Text(
+            "Stock Successfully Transferred from Cassia to Battistini!",
+          ),
           backgroundColor: Colors.green,
         ),
       );
@@ -186,21 +236,23 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
             children: [
               pw.Header(
                 level: 0,
-                child: pw.Text("SUHADA INVENTORY - ORDER REQUEST"),
+                child: pw.Text("SUHADA INVENTORY - STOCK TRANSFER"),
               ),
               pw.SizedBox(height: 10),
               pw.Text("Order ID: $orderId"),
               pw.Text("Date: ${DateTime.now().toString().substring(0, 16)}"),
               pw.Divider(),
               pw.TableHelper.fromTextArray(
-                headers: ['Product Name', 'Quantity'],
+                headers: ['Product Name', 'Quantity (Qty/Kg)'],
                 data: items
                     .map((item) => [item['name'], item['qty'].toString()])
                     .toList(),
               ),
               pw.Padding(
                 padding: const pw.EdgeInsets.only(top: 20),
-                child: pw.Text("Status: PENDING DELIVERY"),
+                child: pw.Text(
+                  "Origin: CASSIA BRANCH | Destination: BATTISTINI BRANCH",
+                ),
               ),
             ],
           );
@@ -211,8 +263,6 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
       onLayout: (PdfPageFormat format) async => pdf.save(),
     );
   }
-
-  // --- UI BUILDING ---
 
   @override
   Widget build(BuildContext context) {
@@ -250,6 +300,36 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
     return Column(
       children: [
         _buildSearchHeader(),
+        // 🔥 කුඩා Clear Cart Button එක පෙන්වන Section එක
+        if (currentCart.isNotEmpty && !isSearching)
+          Padding(
+            padding: const EdgeInsets.only(right: 16, top: 8),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _clearCart,
+                icon: const Icon(
+                  Icons.delete_sweep,
+                  color: Colors.red,
+                  size: 18,
+                ),
+                label: const Text(
+                  "Clear All Items",
+                  style: TextStyle(color: Colors.red, fontSize: 13),
+                ),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  backgroundColor: Colors.red.withOpacity(0.08),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ),
         Expanded(
           child: Stack(
             children: [
@@ -265,14 +345,14 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        "Cart is empty",
+                        "No items in request",
                         style: TextStyle(color: Colors.grey[400]),
                       ),
                     ],
                   ),
                 ),
               ListView.builder(
-                padding: const EdgeInsets.only(top: 10, bottom: 80),
+                padding: const EdgeInsets.only(top: 5, bottom: 80),
                 itemCount: currentCart.length,
                 itemBuilder: (context, index) {
                   final item = currentCart[index];
@@ -295,22 +375,26 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       subtitle: Text(
-                        "Quantity: ${item['qty']}",
+                        "Req Qty/Kg: ${item['qty']}",
                         style: TextStyle(
                           color: darkGreen,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
                       trailing: CircleAvatar(
-                        backgroundColor: Colors.red.withValues(alpha: 0.1),
+                        backgroundColor: Colors.red.withOpacity(0.1),
                         child: IconButton(
                           icon: const Icon(
                             Icons.delete_outline,
                             color: Colors.red,
                             size: 20,
                           ),
-                          onPressed: () =>
-                              setState(() => currentCart.removeAt(index)),
+                          onPressed: () async {
+                            setState(() {
+                              currentCart.removeAt(index);
+                            });
+                            await _saveCart(); // 🔥 Save cart after single item removal
+                          },
                         ),
                       ),
                     ),
@@ -326,7 +410,7 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
         if (currentCart.isNotEmpty)
           Container(
             padding: const EdgeInsets.all(16.0),
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
@@ -372,7 +456,7 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
             Icon(Icons.cloud_off, size: 60, color: Colors.grey[300]),
             const SizedBox(height: 10),
             const Text(
-              "No Cloud Records Found",
+              "No Requests Found",
               style: TextStyle(color: Colors.grey),
             ),
           ],
@@ -393,10 +477,7 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
           margin: const EdgeInsets.only(bottom: 12),
           elevation: 2,
           shape: RoundedRectangleBorder(
-            side: BorderSide(
-              color: statusColor.withValues(alpha: 0.3),
-              width: 1,
-            ),
+            side: BorderSide(color: statusColor.withOpacity(0.3), width: 1),
             borderRadius: BorderRadius.circular(15),
           ),
           child: ExpansionTile(
@@ -423,7 +504,7 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
                         style: const TextStyle(fontWeight: FontWeight.w500),
                       ),
                       trailing: Text(
-                        "x${item['qty']}",
+                        "x ${item['qty']}",
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -443,12 +524,15 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
                               )
                             : ElevatedButton.icon(
                                 onPressed: () => _completeAndSyncStock(index),
-                                icon: const Icon(Icons.sync_alt, size: 18),
+                                icon: const Icon(
+                                  Icons.check_circle_outline,
+                                  size: 18,
+                                ),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.green[600],
                                   foregroundColor: Colors.white,
                                 ),
-                                label: const Text("Complete & Sync"),
+                                label: const Text("Receive & Update Stock"),
                               ),
                       ),
                       const SizedBox(width: 10),
@@ -483,10 +567,10 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
       ),
       child: TextField(
         controller: _searchController,
-        onChanged: _searchProductsOnline,
+        onChanged: _searchProductsOnline, // 🔥 Live Firestore Search
         style: const TextStyle(color: Colors.black),
         decoration: InputDecoration(
-          hintText: "Search Product Name...",
+          hintText: "Search in Cassia Stock...",
           prefixIcon: Icon(Icons.search, color: darkGreen),
           suffixIcon: IconButton(
             icon: Icon(Icons.qr_code_scanner, color: darkGreen),
@@ -513,20 +597,33 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
         itemBuilder: (context, index) {
           final p = searchResults[index];
           return ListTile(
-            leading: Icon(
-              Icons.inventory_2,
-              color: darkGreen.withValues(alpha: 0.5),
-            ),
+            leading: Icon(Icons.inventory_2, color: darkGreen.withOpacity(0.5)),
             title: Text(
               p['name'],
               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
             ),
             subtitle: Text(
-              "Current Stock: ${p['stock_quantity'] ?? 0}",
+              "Cassia Stock: ${p['cassia_stock'] ?? 0}", // 🔥 Cassia වල තියෙන Live Stock එක පෙන්වයි
               style: const TextStyle(fontSize: 12),
             ),
             trailing: Icon(Icons.add_circle, color: darkGreen),
-            onTap: () => _showQuantityDialog(p),
+            onTap: () {
+              // 🔥 🛑 Cassia stock එක බින්දුවට වඩා වැඩිනම් පමණක් Dialog එක Open කරයි.
+              double cassiaStock =
+                  double.tryParse(p['cassia_stock'].toString()) ?? 0.0;
+              if (cassiaStock <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      "Out of Stock in Cassia Branch! Can't request.",
+                    ),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              } else {
+                _showQuantityDialog(p);
+              }
+            },
           );
         },
       ),
@@ -535,6 +632,12 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
 
   void _showQuantityDialog(dynamic p) {
     final qtyController = TextEditingController();
+    bool isLoose = p['is_loose'] == true;
+
+    // 🔥 දැනට තියෙන Live Stock එක ලබාගැනීම
+    double availableStock =
+        double.tryParse(p['cassia_stock']?.toString() ?? '0') ?? 0.0;
+
     showDialog(
       context: context,
       builder: (c) => AlertDialog(
@@ -546,18 +649,31 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-              "Enter quantity to request from Battistini branch.",
-              style: TextStyle(fontSize: 13, color: Colors.grey),
+            Text(
+              isLoose
+                  ? "Enter Weight in Kg (Ex: 1.5)"
+                  : "Enter Quantity to request from Cassia Stock.",
+              style: const TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              "Available Stock: $availableStock",
+              style: const TextStyle(
+                fontSize: 14,
+                color: Colors.blue,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 15),
             TextField(
               controller: qtyController,
-              keyboardType: TextInputType.number,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               decoration: InputDecoration(
-                labelText: "Quantity",
+                labelText: isLoose ? "Weight (Kg)" : "Quantity",
                 labelStyle: TextStyle(color: darkGreen),
                 focusedBorder: OutlineInputBorder(
                   borderSide: BorderSide(color: darkGreen, width: 2),
@@ -577,18 +693,40 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
             child: Text("CANCEL", style: TextStyle(color: Colors.grey[600])),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
+              double requestedQty = double.tryParse(qtyController.text) ?? 0.0;
+
+              if (requestedQty <= 0) {
+                return; // 🛑 0 ට වඩා අඩු අගයන් block කිරීම
+              }
+
+              // 🔥 🛑 තියෙන Stock එකට වඩා වැඩියෙන් Request කරොත් Block කරන තැන
+              if (requestedQty > availableStock) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      "Not enough stock in Cassia! Max available is $availableStock",
+                    ),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return; // Dialog එකේ නවතියි, Cart එකට වැටෙන්නේ නෑ
+              }
+
               setState(() {
                 currentCart.add({
                   'id': p['id'],
                   'name': p['name'],
-                  'qty': int.tryParse(qtyController.text) ?? 0,
+                  'qty': requestedQty,
                   'sku': p['sku'] ?? '',
                 });
                 searchResults = [];
                 _searchController.clear();
               });
-              Navigator.pop(c);
+
+              await _saveCart(); // 🔥 Save cart immediately after adding an item
+
+              if (mounted) Navigator.pop(c);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: darkGreen,
@@ -597,7 +735,7 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
               ),
             ),
             child: const Text(
-              "ADD TO LIST",
+              "ADD TO REQUEST",
               style: TextStyle(color: Colors.white),
             ),
           ),
@@ -656,43 +794,97 @@ class _OrderRequestScreenState extends State<OrderRequestScreen> {
     );
   }
 
+  // Barcode එකෙන් සර්ච් කරද්දීත් Firestore එක පාවිච්චි කිරීම
   Future<void> _scanAndAddProduct(String code) async {
     setState(() => isSearching = true);
     try {
-      final url =
-          "${AppConstants.baseUrl}/products?consumer_key=${AppConstants.ck}&consumer_secret=${AppConstants.cs}&sku=$code";
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        List data = json.decode(response.body);
-        if (data.isNotEmpty) {
-          if (!mounted) return;
-          _showQuantityDialog(data.first);
+      final snapshot = await FirebaseFirestore.instance
+          .collection('products_data')
+          .where('sku', isEqualTo: code)
+          .get();
+
+      if (snapshot.docs.isNotEmpty) {
+        final doc = snapshot.docs.first;
+        final data = doc.data();
+        if (!mounted) return;
+
+        double cassiaStock =
+            double.tryParse(data['cassia_stock']?.toString() ?? '0') ?? 0.0;
+
+        if (cassiaStock <= 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                "Out of Stock in Cassia Branch! Can't request by Scan.",
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
         } else {
-          if (!mounted) return;
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text("Product not found!")));
+          _showQuantityDialog({
+            'id': doc.id,
+            'name': data['name'],
+            'sku': data['sku'],
+            'cassia_stock': cassiaStock,
+            'is_loose': data['is_loose'] ?? false,
+          });
         }
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Product SKU not found in Cloud Database!"),
+          ),
+        );
       }
+    } catch (e) {
+      // ignore: avoid_print
+      print("Scanner Error: $e");
     } finally {
       if (mounted) setState(() => isSearching = false);
     }
   }
 
+  // 🔥 3. කෙලින්ම Firestore එකෙන් Live Search කිරීම
   Future<void> _searchProductsOnline(String query) async {
     if (query.isEmpty) {
       setState(() => searchResults = []);
       return;
     }
+
     setState(() => isSearching = true);
+
     try {
-      final url =
-          "${AppConstants.baseUrl}/products?consumer_key=${AppConstants.ck}&consumer_secret=${AppConstants.cs}&search=$query";
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        if (!mounted) return;
-        setState(() => searchResults = json.decode(response.body));
+      final String searchLower = query.toLowerCase();
+
+      final snapshot = await FirebaseFirestore.instance
+          .collection('products_data')
+          .get();
+
+      List<Map<String, dynamic>> results = [];
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final String name = data['name']?.toString().toLowerCase() ?? '';
+        final String sku = data['sku']?.toString() ?? '';
+
+        if (name.contains(searchLower) || sku.contains(searchLower)) {
+          results.add({
+            'id': doc.id,
+            'name': data['name'],
+            'sku': sku,
+            'cassia_stock': data['cassia_stock'] ?? 0,
+            'battistini_stock': data['battistini_stock'] ?? 0,
+            'is_loose': data['is_loose'] ?? false,
+          });
+        }
       }
+
+      if (!mounted) return;
+      setState(() => searchResults = results);
+    } catch (e) {
+      // ignore: avoid_print
+      print("Firestore Search Error: $e");
     } finally {
       if (mounted) setState(() => isSearching = false);
     }

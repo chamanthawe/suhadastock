@@ -21,6 +21,7 @@ import 'order_screen.dart';
 import 'printer_manager.dart';
 import 'product_details_screen.dart';
 import 'stock_update_screen.dart';
+import 'supplier_settlement_screen.dart';
 
 class ProductListScreen extends StatefulWidget {
   final List initialProducts;
@@ -164,6 +165,20 @@ class _ProductListScreenState extends State<ProductListScreen>
     List meta = p['meta_data'] ?? [];
     var found = meta.firstWhere((m) => m['key'] == key, orElse: () => null);
     return found != null ? found['value'].toString() : "0";
+  }
+
+  // 🔥 🛠️ අලුතින් එක්කළ Helper එකක් (බඩුව Case එකක්ද කියලා බලන්න)
+  bool _isCaseProductFromFirestore(Map p) {
+    String id = p['id'].toString();
+    if (_firestoreStocks.containsKey(id)) {
+      return _firestoreStocks[id]!['is_case_product'] ?? false;
+    }
+    List meta = p['meta_data'] ?? [];
+    var found = meta.firstWhere(
+      (m) => m['key'] == 'is_case_product',
+      orElse: () => null,
+    );
+    return found != null ? found['value'] == 'yes' : false;
   }
 
   Future<void> _fetchAllProductsInBackground() async {
@@ -631,20 +646,35 @@ class _ProductListScreenState extends State<ProductListScreen>
   }
 
   Widget _buildMainProductView(String tabFilter) {
+    // 🔍 1. මුලින්ම Chip එක අනුව list එක හදාගන්නවා (No Barcode / No Price)
     List filteredList = products;
-    if (tabFilter == "Reorder") {
+
+    if (_activeFilter == "No Barcode") {
       filteredList = products.where((p) {
+        String barcode = _getEffectiveStock(p, 'sku');
+        return barcode.isEmpty || barcode == "0";
+      }).toList();
+    } else if (_activeFilter == "No Shop Price") {
+      filteredList = products.where((p) {
+        String price = _getEffectiveStock(p, 'shop_price');
+        return price.isEmpty || price == "0";
+      }).toList();
+    }
+
+    // 🔍 2. ඊට පස්සේ Tab එක අනුව ඒ List එක තවත් Filter කරනවා (Reorder / Out)
+    if (tabFilter == "Reorder") {
+      filteredList = filteredList.where((p) {
         int cassia = int.tryParse(_getEffectiveStock(p, 'cassia_stock')) ?? 0;
         int battistini =
             int.tryParse(_getEffectiveStock(p, 'battistini_stock')) ?? 0;
-        return (cassia + battistini) <= 15;
+        return (cassia + battistini) < 20; // 🔥 20 ට අඩු
       }).toList();
     } else if (tabFilter == "Out") {
-      filteredList = products.where((p) {
+      filteredList = filteredList.where((p) {
         int cassia = int.tryParse(_getEffectiveStock(p, 'cassia_stock')) ?? 0;
         int battistini =
             int.tryParse(_getEffectiveStock(p, 'battistini_stock')) ?? 0;
-        return (cassia == 0 && battistini == 0);
+        return (cassia == 0 && battistini == 0); // 🔥 දෙකම 0 නම් පමණක්
       }).toList();
     }
 
@@ -660,7 +690,14 @@ class _ProductListScreenState extends State<ProductListScreen>
           }
           var p = filteredList[index];
           String sellingPrice = _getEffectiveStock(p, 'shop_price');
-          if (sellingPrice == "0") sellingPrice = p['price'].toString();
+          if (sellingPrice == "0" || sellingPrice.isEmpty) {
+            sellingPrice = p['price'].toString();
+          }
+
+          bool isCaseProduct = _isCaseProductFromFirestore(
+            p,
+          ); // 🔥 Case Product Detection
+
           return Card(
             margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: ListTile(
@@ -669,20 +706,60 @@ class _ProductListScreenState extends State<ProductListScreen>
                     ? p['images'][0]['src']
                     : "",
               ),
-              title: Text(
-                p['name'] ?? "No Name",
-                style: const TextStyle(fontWeight: FontWeight.bold),
+              title: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      p['name'] ?? "No Name",
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  if (isCaseProduct) ...[
+                    const SizedBox(width: 5),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.orange[800],
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: const Text(
+                        "📦 Case",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
               subtitle: Text(
                 "Price: €$sellingPrice | Stock: ${_getEffectiveStock(p, 'cassia_stock')} (C) | ${_getEffectiveStock(p, 'battistini_stock')} (B)",
               ),
               trailing: Icon(Icons.edit_note, color: darkGreen),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ProductDetailsScreen(product: p),
-                ),
-              ),
+              onTap: () async {
+                final updatedProduct = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ProductDetailsScreen(product: p),
+                  ),
+                );
+
+                if (updatedProduct != null && updatedProduct is Map) {
+                  setState(() {
+                    int pIndex = products.indexWhere(
+                      (element) => element['id'] == p['id'],
+                    );
+                    if (pIndex != -1) {
+                      products[pIndex] = updatedProduct;
+                    }
+                  });
+                }
+              },
             ),
           );
         },
@@ -811,8 +888,24 @@ class _ProductListScreenState extends State<ProductListScreen>
                   onPressed: _handleAdminLogin,
                   child: const Text("UNFOLD ADMIN PANEL"),
                 ),
-                const SizedBox(height: 20),
-                // 🔔 මෙන්න අලුතින් එකතු කරපු Button එක
+                const SizedBox(height: 15), // 🔥 Space එකක් එකතු කළා
+                // 👇 මෙන්න අලුතින්ම එකතු කරපු Supplier Settlement බටන් එක
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.orangeAccent),
+                    foregroundColor: Colors.orangeAccent,
+                    minimumSize: const Size(double.infinity, 50),
+                  ),
+                  icon: const Icon(Icons.handshake),
+                  label: const Text("SUPPLIER SETTLEMENTS"),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const SupplierSettlementScreen(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 15), // 🔥 Space එකක් එකතු කළා
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: Colors.greenAccent),
