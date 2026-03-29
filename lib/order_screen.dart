@@ -11,10 +11,11 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
 import 'action_buttons_grid.dart';
-// Imports
 import 'after_pay_screen.dart';
 import 'calculator_screen.dart';
-import 'case_management_service.dart'; // 🔥 අලුතින් හදාගත් Case Management Service එක
+import 'cart_view_widget.dart';
+import 'case_break_overlay.dart';
+import 'case_management_service.dart';
 import 'low_stock_alert_widget.dart';
 import 'offline_overlay_widget.dart';
 import 'orderscreen_setting.dart';
@@ -23,7 +24,7 @@ import 'printer_manager.dart';
 import 'quick_product_grid.dart';
 import 'receipt_service.dart';
 import 'search_overlay_widget.dart';
-import 'time_sync.dart'; // ඔයා හදාගත්ත file එකේ නම
+import 'time_sync.dart';
 
 List<Map<String, dynamic>> globalCart = [];
 double globalDiscount = 0;
@@ -72,7 +73,6 @@ class _OrderScreenState extends State<OrderScreen> {
   bool _showSecretProfit = false;
   bool _isRefreshingStock = false;
 
-  // --- Low Stock Variables ---
   Map<String, dynamic>? _lowStockProduct;
   int _lowStockValue = 0;
 
@@ -89,7 +89,6 @@ class _OrderScreenState extends State<OrderScreen> {
   final Color accentGreen = const Color(0xFF43A047);
   final Color lightGreenBg = const Color(0xFFF1F8E9);
 
-  // 🔥 1. Case Management Variables
   bool _showCaseBreakButton = false;
   Map<String, dynamic>? _detectedCaseProduct;
   final CaseManagementService _caseService = CaseManagementService();
@@ -113,7 +112,6 @@ class _OrderScreenState extends State<OrderScreen> {
     });
   }
 
-  // --- Connectivity Logic ---
   void _startConnectivityCheck() {
     _connectivityTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       _checkStatus();
@@ -194,19 +192,16 @@ class _OrderScreenState extends State<OrderScreen> {
               'battistini_stock': data['battistini_stock'] ?? 0,
               'cassia_stock': data['cassia_stock'] ?? 0,
               'image': data['image'] ?? "",
-
-              // 🔥 2. Case Management Fields Sync from Firestore
               'is_case_product': data['is_case_product'] ?? false,
               'linked_single_product_id':
                   data['linked_single_product_id'] ?? "",
               'items_per_case': data['items_per_case'] ?? 12,
+              'is_weighted': data['is_weighted'] ?? false,
             };
-            if (productInfo['sku'] != "") {
+            if (productInfo['sku'] != "")
               tempMap[productInfo['sku']!] = productInfo;
-            }
-            if (productInfo['barcode'] != "") {
+            if (productInfo['barcode'] != "")
               tempMap[productInfo['barcode']!] = productInfo;
-            }
             tempMap[doc.id] = productInfo;
           }
           if (mounted) {
@@ -291,7 +286,40 @@ class _OrderScreenState extends State<OrderScreen> {
                     children: [
                       Row(
                         children: [
-                          Expanded(flex: 1, child: _buildCartView()),
+                          Expanded(
+                            flex: 1,
+                            child: CartViewWidget(
+                              globalCart: globalCart,
+                              heldCart: heldCart,
+                              globalDiscount: globalDiscount,
+                              totalValue: totalValue,
+                              totalProfit: totalProfit,
+                              showSecretProfit: _showSecretProfit,
+                              primaryGreen: primaryGreen,
+                              lightGreenBg: lightGreenBg,
+                              scrollController: _cartScrollController,
+                              onHoldCart: _holdCurrentCart,
+                              onRecallCart: _recallCart,
+                              onAddToCart: _addToCart,
+                              onRemoveItem: (index) {
+                                setState(() {
+                                  if (globalCart[index]['qty'] > 1) {
+                                    globalCart[index]['qty']--;
+                                    globalCart[index]['finalPrice'] =
+                                        globalCart[index]['qty'] *
+                                        globalCart[index]['price'];
+                                  } else {
+                                    globalCart.removeAt(index);
+                                  }
+                                });
+                                _calculateTotal();
+                              },
+                              onLongPressTotal: () => setState(
+                                () => _showSecretProfit = !_showSecretProfit,
+                              ),
+                              onConfirmPrint: () => _handlePrint(),
+                            ),
+                          ),
                           const VerticalDivider(width: 1, thickness: 1),
                           Expanded(
                             flex: 2,
@@ -332,9 +360,15 @@ class _OrderScreenState extends State<OrderScreen> {
           ),
         ),
 
-        // 🔥 Creative & Bigger Glassmorphism Case Break Notification 📦
         if (_showCaseBreakButton && _detectedCaseProduct != null)
-          _buildCreativeCaseOverlay(),
+          CaseBreakOverlay(
+            detectedProduct: _detectedCaseProduct!,
+            onBreak: _handleCaseBreakAndMove,
+            onClose: () => setState(() {
+              _showCaseBreakButton = false;
+              _detectedCaseProduct = null;
+            }),
+          ),
 
         if (!_isOnline)
           OfflineOverlayWidget(
@@ -362,124 +396,6 @@ class _OrderScreenState extends State<OrderScreen> {
           ),
         ],
       ],
-    );
-  }
-
-  // 🔥 Creative & Glassmorphism Case Break Notification Widget
-  Widget _buildCreativeCaseOverlay() {
-    return Positioned(
-      bottom: 110,
-      left: 20,
-      right: 20,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(25),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-            decoration: BoxDecoration(
-              color: Colors.orange[800]!.withValues(alpha: 0.85),
-              borderRadius: BorderRadius.circular(25),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.3),
-                width: 1.5,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.3),
-                  blurRadius: 15,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.25),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.unarchive_rounded,
-                    color: Colors.white,
-                    size: 32,
-                  ),
-                ),
-                const SizedBox(width: 15),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        "CASE PRODUCT DETECTED!",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 16,
-                          letterSpacing: 1.1,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        "${_detectedCaseProduct!['name']}",
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w500,
-                          fontSize: 14,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                ElevatedButton(
-                  onPressed: _handleCaseBreakAndMove,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.orange[800],
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 14,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    elevation: 5,
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.broken_image_outlined, size: 20),
-                      SizedBox(width: 8),
-                      Text(
-                        "BREAK CASE",
-                        style: TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white70),
-                  onPressed: () {
-                    setState(() {
-                      _showCaseBreakButton = false;
-                      _detectedCaseProduct = null;
-                    });
-                  },
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 
@@ -551,8 +467,6 @@ class _OrderScreenState extends State<OrderScreen> {
             onDiscount: _applyDiscount,
             onCredit: () async {
               if (globalCart.isEmpty) return;
-
-              // AfterPay එකට ගිහින් එනකම් ඉන්නවා
               var result = await Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -562,13 +476,7 @@ class _OrderScreenState extends State<OrderScreen> {
                   ),
                 ),
               );
-
-              if (result == true) {
-                // AfterPay එක සාර්ථක නම්
-                // Notification එක Firestore එකට යවනවා
-
-                await _handlePrint(isCredit: true);
-              }
+              if (result == true) await _handlePrint(isCredit: true);
             },
             onClear: () {
               if (globalCart.isEmpty) return;
@@ -587,17 +495,57 @@ class _OrderScreenState extends State<OrderScreen> {
     );
   }
 
-  // 🔥 Handling Case Break Stock Transfers
+  Widget _buildCalculatorSection() {
+    return CalculatorSection(
+      rawInput: _rawInput,
+      isPriceMode: _isPriceMode,
+      primaryGreen: primaryGreen,
+      lightGreenBg: lightGreenBg,
+      onKeyTap: (key) {
+        setState(() {
+          if (key == "C") {
+            _rawInput = 0;
+          } else if (key == "00") {
+            _rawInput = int.parse(
+              "$_rawInput"
+              "00",
+            );
+          } else {
+            _rawInput = int.parse("$_rawInput$key");
+          }
+        });
+      },
+      onConfirmToggle: () {
+        if (_isPriceMode && _rawInput > 0) {
+          double pr = _rawInput / 100.0;
+          setState(() {
+            globalCart.add({
+              'id': 'manual_${DateTime.now().millisecondsSinceEpoch}',
+              'name': "Manual Item",
+              'price': pr,
+              'qty': 1.0,
+              'finalPrice': pr,
+              'isWeighted': false,
+              'manage_stock': false,
+            });
+            _rawInput = 0;
+            _isPriceMode = false;
+          });
+          _calculateTotal();
+          _scrollToBottom();
+        } else {
+          setState(() => _isPriceMode = !_isPriceMode);
+        }
+      },
+    );
+  }
+
   Future<void> _handleCaseBreakAndMove() async {
     if (_detectedCaseProduct == null) return;
-
     String caseId = _detectedCaseProduct!['id'].toString();
-
-    // 🚀 1. WooCommerce එකෙන් නෙවෙයි, Firestore Live Cache එකෙන් දත්ත කියවීම (Duplicate Fix)
     var liveData = _localProductCache[caseId] ?? _detectedCaseProduct!;
-
     String singleId = liveData['linked_single_product_id'].toString();
-    int itemsPerCase = liveData['items_per_case'] ?? 12;
+    int itemsPerCase = (liveData['items_per_case'] as num).toInt();
 
     if (singleId.isEmpty || singleId == "null") {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -613,7 +561,6 @@ class _OrderScreenState extends State<OrderScreen> {
         widget.selectedShop.toLowerCase().contains("battistini")
         ? "battistini"
         : "cassia";
-
     int liveStock = _getLiveStockFromCache(liveData);
 
     if (liveStock < 1) {
@@ -636,10 +583,8 @@ class _OrderScreenState extends State<OrderScreen> {
 
     if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            "Case Broken! Moved $itemsPerCase items to Single Product.",
-          ),
+        const SnackBar(
+          content: Text("Case Broken! Moved units successfully."),
           backgroundColor: Colors.green,
         ),
       );
@@ -649,12 +594,6 @@ class _OrderScreenState extends State<OrderScreen> {
       });
     } else {
       _playErrorSound();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Could not break case. Out of stock?"),
-          backgroundColor: Colors.red,
-        ),
-      );
     }
     _barcodeFocusNode.requestFocus();
   }
@@ -664,52 +603,68 @@ class _OrderScreenState extends State<OrderScreen> {
     String cleanBarcode = barcode.trim().replaceAll(RegExp(r'[\n\r]'), '');
     if (cleanBarcode.isEmpty) return;
 
-    if (cleanBarcode.length >= 18) {
+    // --- පවතින Pending Order එකක්දැයි පරීක්ෂා කිරීම (ID එක දිග නිසා මුලින්ම මෙය බලයි) ---
+    if (cleanBarcode.length >= 15) {
       try {
         var pendingDoc = await FirebaseFirestore.instance
             .collection('pending_orders')
             .doc(cleanBarcode)
             .get();
+
         if (pendingDoc.exists) {
           var data = pendingDoc.data()!;
           List items = data['items'] ?? [];
+
           setState(() {
+            // පවතින Cart එක Clear නොකර අලුත් items එකතු කරයි
             for (var item in items) {
+              double itemPrice =
+                  double.tryParse(item['price'].toString()) ?? 0.0;
+              double itemQty = double.tryParse(item['qty'].toString()) ?? 1.0;
+
               globalCart.add({
-                'id': item['id'],
-                'name': item['name'],
-                'price': double.tryParse(item['price'].toString()) ?? 0.0,
-                'qty': double.tryParse(item['qty'].toString()) ?? 1.0,
-                'finalPrice':
-                    (double.tryParse(item['price'].toString()) ?? 0.0) *
-                    (double.tryParse(item['qty'].toString()) ?? 1.0),
-                'isWeighted': item['isWeighted'] ?? false,
+                'id':
+                    item['sku'] ??
+                    'manual_${DateTime.now().millisecondsSinceEpoch}', // SKU එක ID එක ලෙස ගනී
+                'name': item['name'] ?? 'No Name',
+                'price': itemPrice,
+                'qty': itemQty,
+                'finalPrice': double.parse(
+                  (itemPrice * itemQty).toStringAsFixed(2),
+                ),
+                'isWeighted': item['is_weighted'] ?? false,
                 'sku': item['sku'] ?? "",
-                'manage_stock': item['manage_stock'] ?? true,
+                'manage_stock': true,
+                'image': item['image'] ?? "",
               });
             }
           });
+
           _calculateTotal();
           _scrollToBottom();
+
+          // එකවරක් Scan කළ පසු Firestore එකෙන් එම Order එක ඉවත් කරයි (නැවත Scan කිරීම වැළැක්වීමට)
           await FirebaseFirestore.instance
               .collection('pending_orders')
               .doc(cleanBarcode)
               .delete();
-          if (!mounted) return;
+
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text("Mobile Order Sync Successfully!"),
-              backgroundColor: Colors.blue,
+              content: Text("Mobile Order Added to Cart!"),
+              backgroundColor: Colors.green,
             ),
           );
+
           _barcodeBuffer = "";
-          return;
+          return; // මෙතනින් නවතියි, පහල තියෙන Product search එකට යන්නේ නැත.
         }
       } catch (e) {
-        debugPrint("Pending Order Check Error: $e");
+        debugPrint("Pending Order Scan Error: $e");
       }
     }
 
+    // --- සාමාන්‍ය Product Barcode Search කොටස (ඔයාගේ කලින් තිබූ code එකමයි) ---
     List<Map<String, dynamic>> matchingProducts = _localProductCache.values
         .where((p) {
           String pBarcode = p['barcode'].toString().trim();
@@ -722,7 +677,6 @@ class _OrderScreenState extends State<OrderScreen> {
         .toList();
 
     if (matchingProducts.isEmpty) {
-      if (!mounted) return;
       _playErrorSound();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -755,13 +709,13 @@ class _OrderScreenState extends State<OrderScreen> {
               topRight: Radius.circular(20),
             ),
           ),
-          child: Row(
+          child: const Row(
             children: [
-              const Icon(Icons.inventory_2, color: Colors.white),
-              const SizedBox(width: 10),
+              Icon(Icons.inventory_2, color: Colors.white),
+              SizedBox(width: 10),
               Text(
-                "${products.length} Products Found",
-                style: const TextStyle(color: Colors.white, fontSize: 18),
+                "Products Found",
+                style: TextStyle(color: Colors.white, fontSize: 18),
               ),
             ],
           ),
@@ -773,70 +727,24 @@ class _OrderScreenState extends State<OrderScreen> {
             itemCount: products.length,
             itemBuilder: (ctx, i) {
               final p = products[i];
-              String imgUrl = p['image'] ?? "";
-              return Card(
-                elevation: 0,
-                margin: const EdgeInsets.symmetric(vertical: 4),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: Colors.green.withValues(alpha: 0.2)),
+              return ListTile(
+                title: Text(p['name']),
+                subtitle: Text(
+                  "Price: €${p['price']} | Stock: ${_getLiveStockFromCache(p)}",
                 ),
-                child: ListTile(
-                  contentPadding: const EdgeInsets.all(8),
-                  leading: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: imgUrl.isNotEmpty
-                        ? CachedNetworkImage(
-                            imageUrl: imgUrl,
-                            width: 55,
-                            height: 55,
-                            fit: BoxFit.cover,
-                          )
-                        : Container(
-                            width: 55,
-                            height: 55,
-                            color: lightGreenBg,
-                            child: Icon(
-                              Icons.shopping_basket,
-                              color: primaryGreen,
-                            ),
-                          ),
-                  ),
-                  title: Text(
-                    p['name'],
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                  subtitle: Text(
-                    "Price: €${p['price']} | Stock: ${_getLiveStockFromCache(p)}",
-                    style: TextStyle(
-                      color: primaryGreen,
-                      fontWeight: FontWeight.w500,
-                      fontSize: 12,
-                    ),
-                  ),
-                  trailing: Icon(Icons.add_circle_outline, color: primaryGreen),
-                  onTap: () {
-                    _addToCart(p['name'], p);
-                    Navigator.pop(ctx);
-                  },
-                ),
+                trailing: Icon(Icons.add_circle_outline, color: primaryGreen),
+                onTap: () {
+                  _addToCart(p['name'], p);
+                  Navigator.pop(ctx);
+                },
               );
             },
           ),
         ),
         actions: [
           TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _barcodeFocusNode.requestFocus();
-            },
-            child: const Text(
-              "CLOSE",
-              style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold),
-            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("CLOSE"),
           ),
         ],
       ),
@@ -888,22 +796,30 @@ class _OrderScreenState extends State<OrderScreen> {
           double.tryParse(cached?['profit']?.toString() ?? '0.0') ?? 0.0;
       item['price'] = unitPrice;
       item['original_price'] = (discountPrice > 0) ? normalPrice : 0.0;
-      item['discount'] = (discountPrice > 0)
-          ? (normalPrice - discountPrice)
-          : 0.0;
-      item['finalPrice'] = (item['qty'] as double) * unitPrice;
+
+      // දශම 3කට සකසයි
+      double currentQty = double.parse(
+        (item['qty'] as double).toStringAsFixed(3),
+      );
+      item['finalPrice'] = double.parse(
+        (currentQty * unitPrice).toStringAsFixed(2),
+      );
+
       tempT += item['finalPrice'];
-      tempP += (unitProfit * (item['qty'] as double));
+      tempP += (unitProfit * currentQty);
     }
     if (mounted) {
       setState(() {
-        totalValue = (tempT - globalDiscount).clamp(0, double.infinity);
-        totalProfit = (tempP - globalDiscount).clamp(0, double.infinity);
+        totalValue = double.parse(
+          (tempT - globalDiscount).clamp(0, double.infinity).toStringAsFixed(2),
+        );
+        totalProfit = double.parse(
+          (tempP - globalDiscount).clamp(0, double.infinity).toStringAsFixed(2),
+        );
       });
     }
   }
 
-  // 🔥 Universal addToCart with Case Detection (Scan, Search, Grid)
   Future<void> _addToCart(String name, dynamic p) async {
     if (p == null) return;
     int liveStock = _getLiveStockFromCache(p);
@@ -914,7 +830,10 @@ class _OrderScreenState extends State<OrderScreen> {
         ? (globalCart[existingIdx]['qty'] as double)
         : 0.0;
     bool isWeighted = _rawInput > 0;
-    double inputQty = isWeighted ? (_rawInput / 1000.0) : 1.0;
+
+    // Qty එක දශම 3කට සීමා කරයි
+    double rawQty = isWeighted ? (_rawInput / 1000.0) : 1.0;
+    double inputQty = double.parse(rawQty.toStringAsFixed(3));
 
     if ((qtyInCart + inputQty) > liveStock) {
       _showStockAlert();
@@ -931,61 +850,46 @@ class _OrderScreenState extends State<OrderScreen> {
         double.tryParse(cached?['discount_price']?.toString() ?? "0.0") ?? 0.0;
     double unitPrice = (discountPrice > 0) ? discountPrice : normalPrice;
 
-    String imgURL = "";
-    if (p['images'] != null && (p['images'] as List).isNotEmpty) {
-      imgURL = p['images'][0]['src'].toString();
-    } else if (cached != null &&
-        cached['image'] != null &&
-        cached['image'] != "") {
-      imgURL = cached['image'].toString();
-    } else if (p['image'] != null && p['image'] != "") {
-      imgURL = p['image'].toString();
-    }
+    String imgURL =
+        (cached != null && cached['image'] != null && cached['image'] != "")
+        ? cached['image'].toString()
+        : (p['image'] ?? "");
 
     setState(() {
       if (existingIdx != -1) {
-        globalCart[existingIdx]['qty'] =
-            (globalCart[existingIdx]['qty'] as double) + inputQty;
-        globalCart[existingIdx]['finalPrice'] =
-            (globalCart[existingIdx]['qty'] as double) * unitPrice;
+        double newQty = (globalCart[existingIdx]['qty'] as double) + inputQty;
+        globalCart[existingIdx]['qty'] = double.parse(
+          newQty.toStringAsFixed(3),
+        );
+        globalCart[existingIdx]['finalPrice'] = double.parse(
+          (globalCart[existingIdx]['qty'] * unitPrice).toStringAsFixed(2),
+        );
       } else {
         globalCart.add({
           'id': p['id'],
           'name': name,
           'price': unitPrice,
           'original_price': (discountPrice > 0) ? normalPrice : 0.0,
-          'discount': (discountPrice > 0) ? (normalPrice - discountPrice) : 0.0,
           'qty': inputQty,
-          'finalPrice': unitPrice * inputQty,
-          'isWeighted': isWeighted,
+          'finalPrice': double.parse((unitPrice * inputQty).toStringAsFixed(2)),
+          'isWeighted': isWeighted || (p['is_weighted'] == true),
           'sku': p['sku'],
           'manage_stock': true,
           'image': imgURL,
         });
       }
 
-      // 🔥 💡 Universal Case Detection Logic (Search & Quick Grid වලටත් වැඩ)
-      bool isCase = false;
-      String pId = p['id'].toString();
-
-      // Firestore Cache එකේ තියෙන Live දත්තම චෙක් කරනවා
-      if (_localProductCache.containsKey(pId)) {
-        isCase = _localProductCache[pId]!['is_case_product'] == true;
-      } else {
-        isCase = p['is_case_product'] == true;
-      }
-
+      bool isCase =
+          _localProductCache[p['id'].toString()]?['is_case_product'] == true;
       if (isCase) {
         _showCaseBreakButton = true;
-        _detectedCaseProduct =
-            _localProductCache[pId] ?? p; // Live දත්තම Assign කරනවා
+        _detectedCaseProduct = _localProductCache[p['id'].toString()] ?? p;
       } else {
         _showCaseBreakButton = false;
         _detectedCaseProduct = null;
       }
 
       int updatedStockAfterAdd = liveStock - (qtyInCart + inputQty).toInt();
-
       if (updatedStockAfterAdd <= 15 && updatedStockAfterAdd >= 0) {
         _lowStockProduct = {
           'id': p['id'].toString(),
@@ -993,7 +897,6 @@ class _OrderScreenState extends State<OrderScreen> {
           'image': imgURL,
         };
         _lowStockValue = updatedStockAfterAdd;
-
         _sendLowStockNotification(
           p['id'].toString(),
           name,
@@ -1033,296 +936,6 @@ class _OrderScreenState extends State<OrderScreen> {
     } catch (e) {
       debugPrint("Notification Error: $e");
     }
-  }
-
-  Widget _buildCartView() {
-    return Container(
-      color: lightGreenBg.withValues(alpha: 0.3),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: Colors.grey[300]!)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: globalCart.isEmpty ? null : _holdCurrentCart,
-                    icon: const Icon(Icons.pause_circle_outline, size: 18),
-                    label: const Text("HOLD", style: TextStyle(fontSize: 12)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange[800],
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Badge(
-                    label: Text(heldCart.length.toString()),
-                    isLabelVisible: heldCart.isNotEmpty,
-                    child: ElevatedButton.icon(
-                      onPressed: heldCart.isEmpty ? null : _recallCart,
-                      icon: const Icon(Icons.play_circle_outline, size: 18),
-                      label: const Text(
-                        "RECALL",
-                        style: TextStyle(fontSize: 12),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue[800],
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView.builder(
-              controller: _cartScrollController,
-              itemCount: globalCart.length,
-              itemBuilder: (context, index) {
-                final item = globalCart[index];
-                final bool hasDiscount =
-                    item['original_price'] != null &&
-                    item['original_price'] > 0;
-                return Container(
-                  margin: const EdgeInsets.symmetric(
-                    vertical: 3,
-                    horizontal: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.green,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border(
-                      left: BorderSide(color: primaryGreen, width: 4),
-                    ),
-                  ),
-                  child: ListTile(
-                    dense: true,
-                    onTap: () => _addToCart(item['name'], item),
-                    onLongPress: () {
-                      setState(() {
-                        if (item['qty'] > 1) {
-                          item['qty']--;
-                          item['finalPrice'] = item['qty'] * item['price'];
-                        } else {
-                          globalCart.removeAt(index);
-                        }
-                      });
-                      _calculateTotal();
-                    },
-                    title: Text(
-                      item['name'],
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          item['isWeighted'] == true
-                              ? "${(item['qty'] as double).toStringAsFixed(3)} kg"
-                              : "Qty: ${(item['qty'] as double).toInt()}",
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: Colors.black,
-                          ),
-                        ),
-                        if (hasDiscount)
-                          Row(
-                            children: [
-                              Text(
-                                "€${item['original_price'].toStringAsFixed(2)}",
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.red,
-                                  decoration: TextDecoration.lineThrough,
-                                ),
-                              ),
-                              const SizedBox(width: 5),
-                              Text(
-                                "€${item['price'].toStringAsFixed(2)}",
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ],
-                          )
-                        else if (!item['id'].toString().contains('manual'))
-                          Text(
-                            "€${item['price'].toStringAsFixed(2)}",
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: Colors.black54,
-                            ),
-                          ),
-                      ],
-                    ),
-                    trailing: Text(
-                      "€${(item['finalPrice'] as double).toStringAsFixed(2)}",
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          _buildCartSummary(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCartSummary() {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(15),
-          topRight: Radius.circular(15),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 5,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          if (_showSecretProfit)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  "Net Profit:",
-                  style: TextStyle(
-                    color: Colors.green,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  "€ ${totalProfit.toStringAsFixed(2)}",
-                  style: const TextStyle(
-                    color: Colors.green,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              GestureDetector(
-                onLongPress: () =>
-                    setState(() => _showSecretProfit = !_showSecretProfit),
-                child: const Text(
-                  "Total:",
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-                ),
-              ),
-              Text(
-                "€ ${totalValue.toStringAsFixed(2)}",
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: primaryGreen,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ElevatedButton(
-            onPressed: globalCart.isEmpty ? null : () => _handlePrint(),
-            style: ElevatedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 45),
-              backgroundColor: primaryGreen,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-            child: const Text(
-              "Confirm & Print",
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCalculatorSection() {
-    return CalculatorSection(
-      rawInput: _rawInput,
-      isPriceMode: _isPriceMode,
-      primaryGreen: primaryGreen,
-      lightGreenBg: lightGreenBg,
-      onKeyTap: (key) {
-        setState(() {
-          if (key == "C") {
-            _rawInput = 0;
-          } else if (key == "00") {
-            _rawInput = int.parse(
-              "$_rawInput"
-              "00",
-            );
-          } else {
-            _rawInput = int.parse("$_rawInput$key");
-          }
-        });
-      },
-      onConfirmToggle: () {
-        if (_isPriceMode && _rawInput > 0) {
-          double pr = _rawInput / 100.0;
-          setState(() {
-            globalCart.add({
-              'id': 'manual_${DateTime.now().millisecondsSinceEpoch}',
-              'name': "Manual Item",
-              'price': pr,
-              'qty': 1.0,
-              'finalPrice': pr,
-              'isWeighted': false,
-              'manage_stock': false,
-            });
-            _rawInput = 0;
-            _isPriceMode = false;
-          });
-          _calculateTotal();
-          _scrollToBottom();
-        } else {
-          setState(() => _isPriceMode = !_isPriceMode);
-        }
-      },
-    );
   }
 
   void _performOnlineSearch(String query) {
@@ -1397,7 +1010,6 @@ class _OrderScreenState extends State<OrderScreen> {
 
   Future<void> _handlePrint({bool isCredit = false}) async {
     if (globalCart.isEmpty) return;
-
     double? cashReceived;
     double balance = 0;
     bool onlyConfirmNoPrint = false;
@@ -1412,7 +1024,6 @@ class _OrderScreenState extends State<OrderScreen> {
           accentGreen: accentGreen,
         ),
       );
-
       if (result == null) {
         _barcodeFocusNode.requestFocus();
         return;
@@ -1423,23 +1034,16 @@ class _OrderScreenState extends State<OrderScreen> {
     }
 
     final List<Map<String, dynamic>> finalCart = List.from(globalCart);
-    final double finalTotal = totalValue;
-    final double finalProfit = totalProfit;
-    final double finalDiscount = globalDiscount;
-
-    if (!isCredit) {
-      _saveAndSyncData(finalCart, finalTotal, finalProfit, finalDiscount);
-    }
-
+    if (!isCredit)
+      _saveAndSyncData(finalCart, totalValue, totalProfit, globalDiscount);
     if (onlyConfirmNoPrint) {
       _resetAfterOrder("Order Saved Successfully!");
       return;
     }
-
     _startPrintingProcess(
       finalCart,
-      finalTotal,
-      finalDiscount,
+      totalValue,
+      globalDiscount,
       isCredit,
       cashReceived ?? 0,
       balance,
@@ -1468,7 +1072,6 @@ class _OrderScreenState extends State<OrderScreen> {
         );
         return;
       }
-
       bool connected = await PrinterManager.connect(ip);
       if (connected && PrinterManager.printer != null) {
         await ReceiptService.printOrder(
@@ -1483,7 +1086,7 @@ class _OrderScreenState extends State<OrderScreen> {
         _showPrintSuccessCheck(cart, total, discount, isCredit, cash, balance);
       } else {
         _showPrintRetryDialog(
-          "Printer Offline / Connection Failed",
+          "Printer Offline",
           cart,
           total,
           discount,
@@ -1494,7 +1097,7 @@ class _OrderScreenState extends State<OrderScreen> {
       }
     } catch (e) {
       _showPrintRetryDialog(
-        "Print Error: $e",
+        "Error: $e",
         cart,
         total,
         discount,
@@ -1525,10 +1128,7 @@ class _OrderScreenState extends State<OrderScreen> {
                 balance,
               );
             },
-            child: const Text(
-              "RE-PRINT",
-              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-            ),
+            child: const Text("RE-PRINT", style: TextStyle(color: Colors.red)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -1560,9 +1160,7 @@ class _OrderScreenState extends State<OrderScreen> {
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         title: const Text("Print Failed"),
-        content: Text(
-          "$error\n\nOrder එක Database එකට Save වුණා. කරුණාකර නැවත උත්සාහ කරන්න.",
-        ),
+        content: Text("$error\nOrder එක Database එකට Save වුණා."),
         actions: [
           TextButton(
             onPressed: () {
@@ -1602,7 +1200,6 @@ class _OrderScreenState extends State<OrderScreen> {
   ) async {
     final String d = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final String t = DateFormat('HH:mm').format(DateTime.now());
-
     await FirebaseFirestore.instance.collection('orders').add({
       'shop': widget.selectedShop,
       'total_sales': total,
@@ -1620,9 +1217,21 @@ class _OrderScreenState extends State<OrderScreen> {
       bool isBat = widget.selectedShop.toLowerCase().contains("battistini");
       String targetKey = isBat ? "battistini_stock" : "cassia_stock";
 
-      await TimeSync().addOrder(item, (item['qty'] as num).toInt(), targetKey);
-    }
+      var cachedItem = _localProductCache[item['id'].toString()];
+      bool isWeightedProduct =
+          (item['isWeighted'] == true) ||
+          (item['is_weighted'] == true) ||
+          (cachedItem != null && cachedItem['is_weighted'] == true);
 
+      if (!isWeightedProduct) {
+        int qtyToSync = (item['qty'] as num).toInt();
+        await TimeSync().addOrder(item, qtyToSync, targetKey);
+      } else {
+        debugPrint(
+          "Skipping WooCommerce Sync for Weighted Item: ${item['name']}",
+        );
+      }
+    }
     _updateWooStockFast(items);
   }
 
@@ -1630,9 +1239,26 @@ class _OrderScreenState extends State<OrderScreen> {
     for (var item in items) {
       if (item['id'].toString().contains('manual')) continue;
 
-      double soldQty = (item['qty'] as num).toDouble();
-      bool isBat = widget.selectedShop.toLowerCase().contains("battistini");
-      String targetKey = isBat ? "battistini_stock" : "cassia_stock";
+      var cachedItem = _localProductCache[item['id'].toString()];
+      bool isWeightedProduct =
+          (item['isWeighted'] == true) ||
+          (item['is_weighted'] == true) ||
+          (cachedItem != null && cachedItem['is_weighted'] == true);
+
+      dynamic soldQty;
+      if (isWeightedProduct) {
+        // බර දශම 3කට සකසා යවයි
+        soldQty = double.parse(
+          (item['qty'] as num).toDouble().toStringAsFixed(3),
+        );
+      } else {
+        soldQty = (item['qty'] as num).toInt();
+      }
+
+      String targetKey =
+          widget.selectedShop.toLowerCase().contains("battistini")
+          ? "battistini_stock"
+          : "cassia_stock";
 
       try {
         await FirebaseFirestore.instance
@@ -1643,7 +1269,7 @@ class _OrderScreenState extends State<OrderScreen> {
               'last_updated': FieldValue.serverTimestamp(),
             });
       } catch (e) {
-        debugPrint("Sync Error: $e");
+        debugPrint("Firestore Sync Error: $e");
       }
     }
   }
@@ -1655,11 +1281,9 @@ class _OrderScreenState extends State<OrderScreen> {
       totalProfit = 0;
       totalValue = 0;
       _lowStockProduct = null;
-      _showCaseBreakButton =
-          false; // 🔥 Order එක reset වන විට Button එක Hide කිරීම
+      _showCaseBreakButton = false;
       _detectedCaseProduct = null;
     });
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(m),
@@ -1673,9 +1297,9 @@ class _OrderScreenState extends State<OrderScreen> {
     _playErrorSound();
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("තොග අවසන්", style: TextStyle(color: Colors.red)),
-        content: const Text("මෙම භාණ්ඩය තොගයේ නොමැත."),
+      builder: (ctx) => const AlertDialog(
+        title: Text("තොග අවසන්", style: TextStyle(color: Colors.red)),
+        content: Text("මෙම භාණ්ඩය තොගයේ නොමැත."),
       ),
     );
   }
@@ -1727,12 +1351,10 @@ class _OrderScreenState extends State<OrderScreen> {
     if (doc.exists && mounted) {
       List d = (doc.data() as Map<String, dynamic>)['items'] ?? [];
       setState(() {
-        for (int i = 0; i < d.length; i++) {
-          if (i < 50) {
-            quickProducts[i] = d[i] != null
-                ? Map<String, dynamic>.from(d[i] as Map)
-                : null;
-          }
+        for (int i = 0; i < d.length && i < 50; i++) {
+          quickProducts[i] = d[i] != null
+              ? Map<String, dynamic>.from(d[i] as Map)
+              : null;
         }
       });
     }
@@ -1782,14 +1404,26 @@ class _OrderScreenState extends State<OrderScreen> {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(15),
+            borderRadius: BorderRadius.circular(20),
           ),
-          title: Text(
-            categoryName,
-            style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold),
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                categoryName,
+                style: TextStyle(
+                  color: primaryGreen,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Text(
+                "Long Press to Edit",
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
           ),
           content: SizedBox(
-            width: MediaQuery.of(context).size.width * 0.9,
+            width: MediaQuery.of(context).size.width * 0.8,
             child: GridView.builder(
               shrinkWrap: true,
               itemCount: itemCount,
@@ -1797,43 +1431,77 @@ class _OrderScreenState extends State<OrderScreen> {
                 crossAxisCount: 6,
                 crossAxisSpacing: 10,
                 mainAxisSpacing: 10,
+                childAspectRatio: 0.9,
               ),
               itemBuilder: (context, index) {
                 var p = categoryQuickItems[categoryName]![index];
-                return GestureDetector(
-                  onTap: () {
-                    if (p != null) {
-                      _addToCart(p['name'], p);
-                      Navigator.pop(context);
-                    } else {
-                      _pickProductForCategory(
-                        categoryName,
-                        index,
-                        setDialogState,
-                      );
-                    }
-                  },
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: primaryGreen.withValues(alpha: 0.2),
+                return Column(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          if (p != null) {
+                            _addToCart(p['name'], p);
+                            Navigator.pop(context);
+                          } else {
+                            _pickProductForCategory(
+                              categoryName,
+                              index,
+                              setDialogState,
+                            );
+                          }
+                        },
+                        onLongPress: () => _pickProductForCategory(
+                          categoryName,
+                          index,
+                          setDialogState,
+                        ),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(15),
+                            border: Border.all(
+                              color: p == null
+                                  ? Colors.grey[300]!
+                                  : primaryGreen,
+                              width: 2,
+                            ),
+                            boxShadow: const [
+                              BoxShadow(color: Colors.black12, blurRadius: 4),
+                            ],
+                          ),
+                          child: p == null
+                              ? const Icon(
+                                  Icons.add_circle_outline,
+                                  color: Colors.grey,
+                                  size: 30,
+                                )
+                              : ClipRRect(
+                                  borderRadius: BorderRadius.circular(13),
+                                  child: CachedNetworkImage(
+                                    imageUrl: p['image'] ?? "",
+                                    fit: BoxFit.cover,
+                                    errorWidget: (c, u, e) => Icon(
+                                      Icons.fastfood,
+                                      color: primaryGreen,
+                                    ),
+                                  ),
+                                ),
+                        ),
                       ),
                     ),
-                    child: p == null
-                        ? Icon(
-                            Icons.add,
-                            color: primaryGreen.withValues(alpha: 0.5),
-                          )
-                        : ClipRRect(
-                            borderRadius: BorderRadius.circular(11),
-                            child: CachedNetworkImage(
-                              imageUrl: p['image'] ?? "",
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                  ),
+                    const SizedBox(height: 5),
+                    Text(
+                      p != null ? p['name'] : "Empty",
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 );
               },
             ),
@@ -1876,9 +1544,8 @@ class _OrderScreenState extends State<OrderScreen> {
                       "${widget.baseUrl}/products?consumer_key=${widget.ck}&consumer_secret=${widget.cs}&search=$v&per_page=15",
                     ),
                   );
-                  if (r.statusCode == 200) {
+                  if (r.statusCode == 200)
                     setMState(() => res = json.decode(r.body));
-                  }
                 },
               ),
               Expanded(

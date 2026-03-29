@@ -2,8 +2,7 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
-
-import 'constants.dart';
+// import 'constants.dart'; // ඔයාගේ path එක අනුව තියාගන්න
 
 class CaseManagementService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -12,51 +11,54 @@ class CaseManagementService {
     required String caseProductId,
     required String singleProductId,
     required int itemsPerCase,
-    required String branch, // 'cassia' හෝ 'battistini'
+    required String branch,
   }) async {
     try {
       final String stockKey = '${branch}_stock';
 
-      // 🛒 1. Firestore එකෙන් Case සහ Single Product දෙකේම දත්ත කියවීම
-      final caseDoc = await _firestore
+      // 🛒 1. Firestore එකෙන් Document References ලබා ගැනීම
+      final caseRef = _firestore.collection('products_data').doc(caseProductId);
+      final singleRef = _firestore
           .collection('products_data')
-          .doc(caseProductId)
-          .get();
-      final singleDoc = await _firestore
-          .collection('products_data')
-          .doc(singleProductId)
-          .get();
+          .doc(singleProductId);
 
-      if (!caseDoc.exists || !singleDoc.exists) return false;
+      // 🔥 2. Transaction එකක් භාවිතා කිරීම වඩාත් ආරක්ෂිතයි (එකවර දෙන්නෙක් කළොත් අවුල් නොවෙන්න)
+      return await _firestore.runTransaction((transaction) async {
+        final caseDoc = await transaction.get(caseRef);
+        final singleDoc = await transaction.get(singleRef);
 
-      // 🔍 2. WooCommerce එකෙන් නෙවෙයි, Firestore එකෙන්ම කෙලින්ම Stock එක කියවීම
-      double currentCaseStock =
-          double.tryParse(caseDoc.data()![stockKey]?.toString() ?? '0') ?? 0.0;
-      double currentSingleStock =
-          double.tryParse(singleDoc.data()![stockKey]?.toString() ?? '0') ??
-          0.0;
+        if (!caseDoc.exists || !singleDoc.exists) return false;
 
-      // ✅ අදාළ කඩේ Case Stock එක 1 ට වඩා අඩු නම් Break කරන්න දෙන්නේ නැත
-      if (currentCaseStock < 1.0) return false;
+        // 🔍 3. අගයන් පූර්ණ සංඛ්‍යා (int) ලෙස ලබා ගැනීම
+        // num.toInt() භාවිතා කිරීමෙන් double තිබුණත් ඒක int එකක් බවට පත් වෙනවා
+        int currentCaseStock = (caseDoc.data()![stockKey] as num? ?? 0).toInt();
+        int currentSingleStock = (singleDoc.data()![stockKey] as num? ?? 0)
+            .toInt();
 
-      // 🧮 3. අලුත් Stock ගණනය කිරීම
-      double finalCaseStock = currentCaseStock - 1.0;
-      double finalSingleStock = currentSingleStock + itemsPerCase;
+        // ✅ Case Stock එක 1 ට වඩා අඩු නම් නවත්වන්න
+        if (currentCaseStock < 1) return false;
 
-      // 🔥 4. Firestore Live Update
-      await _firestore.collection('products_data').doc(caseProductId).update({
-        stockKey: finalCaseStock,
+        // 🧮 4. අලුත් Stock ගණනය කිරීම (අනිවාර්යයෙන්ම int විදිහට)
+        int finalCaseStock = currentCaseStock - 1;
+        int finalSingleStock = currentSingleStock + itemsPerCase;
+
+        // 🔥 5. Firestore Update (අගයන් int ලෙසම යවනවා)
+        transaction.update(caseRef, {
+          stockKey: finalCaseStock,
+          'last_updated': FieldValue.serverTimestamp(),
+        });
+
+        transaction.update(singleRef, {
+          stockKey: finalSingleStock,
+          'last_updated': FieldValue.serverTimestamp(),
+        });
+
+        // ☁️ 6. WooCommerce Sync (පසුබිමින් ක්‍රියාත්මක වේ)
+        _syncToWooCommerce(caseProductId, finalCaseStock, branch);
+        _syncToWooCommerce(singleProductId, finalSingleStock, branch);
+
+        return true;
       });
-
-      await _firestore.collection('products_data').doc(singleProductId).update({
-        stockKey: finalSingleStock,
-      });
-
-      // ☁️ 5. WooCommerce Sync (WooCommerce වල තියෙන meta data අප්ඩේට් කිරීම)
-      await _syncToWooCommerce(caseProductId, finalCaseStock, branch);
-      await _syncToWooCommerce(singleProductId, finalSingleStock, branch);
-
-      return true;
     } catch (e) {
       print("Case Break Error: $e");
       return false;
@@ -65,11 +67,12 @@ class CaseManagementService {
 
   Future<void> _syncToWooCommerce(
     String productId,
-    double newStock,
+    int newStock, // මෙතනත් int භාවිතා කරන්න
     String branch,
   ) async {
+    // සටහන: මෙහි AppConstants වෙනුවට ඔයාගේ code එකේ තියෙන විදිහට baseUrl/ck/cs දාන්න
     final String url =
-        "${AppConstants.baseUrl}/products/$productId?consumer_key=${AppConstants.ck}&consumer_secret=${AppConstants.cs}";
+        "YOUR_BASE_URL/products/$productId?consumer_key=YOUR_CK&consumer_secret=YOUR_CS";
 
     Map<String, dynamic> body = {
       "meta_data": [
@@ -77,15 +80,18 @@ class CaseManagementService {
       ],
     };
 
-    if (branch == 'cassia') {
-      body["stock_quantity"] = newStock
-          .toInt(); // Cassia නම් Main Stock එකත් අප්ඩේට් වෙයි
-    }
+    // Cassia හෝ වෙනත් logic අනුව stock_quantity update කිරීම
+    body["manage_stock"] = true;
+    body["stock_quantity"] = newStock;
 
-    await http.put(
-      Uri.parse(url),
-      headers: {"Content-Type": "application/json"},
-      body: json.encode(body),
-    );
+    try {
+      await http.put(
+        Uri.parse(url),
+        headers: {"Content-Type": "application/json"},
+        body: json.encode(body),
+      );
+    } catch (e) {
+      print("WooSync Error: $e");
+    }
   }
 }

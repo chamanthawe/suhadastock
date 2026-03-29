@@ -27,8 +27,8 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     double profit,
     Map<String, int> topProducts,
     double totalBills,
-    double shortEatsExpense, // 🔥 එකතු කල නව Parameter එක
-    double shortEatsProfit, // 🔥 එකතු කල නව Parameter එක
+    double shortEatsExpense,
+    double shortEatsProfit,
   ) async {
     final TextEditingController cardController = TextEditingController(
       text: "0.00",
@@ -98,8 +98,8 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                 topProducts,
                 totalBills,
                 cardAmount,
-                shortEatsExpense, // 🔥
-                shortEatsProfit, // 🔥
+                shortEatsExpense,
+                shortEatsProfit,
               );
             },
             child: const Text(
@@ -153,7 +153,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     await Printing.layoutPdf(onLayout: (format) async => pdf.save());
   }
 
-  // --- මුළු Report එක PDF ලෙස ලබා ගැනීම (Card Machine සහ Short Eats සහිතව) ---
+  // --- මුළු Report එක PDF ලෙස ලබා ගැනීම ---
   Future<void> _generatePdf(
     List<QueryDocumentSnapshot> docs,
     double totalSales,
@@ -161,8 +161,8 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     Map<String, int> topProducts,
     double totalBills,
     double cardAmount,
-    double shortEatsExpense, // 🔥
-    double shortEatsProfit, // 🔥
+    double shortEatsExpense,
+    double shortEatsProfit,
   ) async {
     final pdf = pw.Document();
     final dateStr = DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now());
@@ -244,16 +244,16 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                 [
                   'Short Eats Supplier Payout (-)',
                   shortEatsExpense.toStringAsFixed(2),
-                ], // 🔥
+                ],
                 [
                   'Final Physical Cash Balance',
                   (totalSales - totalBills - cardAmount - shortEatsExpense)
-                      .toStringAsFixed(2), // 🔥
+                      .toStringAsFixed(2),
                 ],
                 [
                   'Net Profit (POS + ShortEats)',
                   (profit + shortEatsProfit).toStringAsFixed(2),
-                ], // 🔥
+                ],
                 ['Staff Consumption', staffTotal.toStringAsFixed(2)],
               ],
             ),
@@ -327,9 +327,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                   builder: (context, billSnapshot) {
                     return StreamBuilder<QuerySnapshot>(
                       stream: FirebaseFirestore.instance
-                          .collection(
-                            'short_eats_settlements',
-                          ) // 🔥 නව Short eats collection එක
+                          .collection('suppliers_settlements')
                           .where('shop', isEqualTo: widget.branchName)
                           .snapshots(),
                       builder: (context, shortEatSnapshot) {
@@ -340,6 +338,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                             child: CircularProgressIndicator(),
                           );
 
+                        // --- Orders Filtering ---
                         var filteredOrders = orderSnapshot.data!.docs.where((
                           doc,
                         ) {
@@ -356,6 +355,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                               );
                         }).toList();
 
+                        // --- Bills Filtering ---
                         var filteredBills = billSnapshot.data!.docs.where((
                           doc,
                         ) {
@@ -375,22 +375,28 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                               );
                         }).toList();
 
-                        // 🔥 Short Eats Settlements filtering logic
+                        // --- Short Eats Settlements Filtering (සීමාව අනුව නිවැරදිව පෙරීම) ---
                         var filteredShortEats = shortEatSnapshot.data!.docs
                             .where((doc) {
                               String dStr = doc['date'] ?? "";
                               if (selectedRange == null) return dStr == today;
-                              DateTime d = DateFormat('yyyy-MM-dd').parse(dStr);
-                              return d.isAfter(
-                                    selectedRange!.start.subtract(
-                                      const Duration(days: 1),
-                                    ),
-                                  ) &&
-                                  d.isBefore(
-                                    selectedRange!.end.add(
-                                      const Duration(days: 1),
-                                    ),
-                                  );
+                              try {
+                                DateTime d = DateFormat(
+                                  'yyyy-MM-dd',
+                                ).parse(dStr);
+                                return d.isAfter(
+                                      selectedRange!.start.subtract(
+                                        const Duration(days: 1),
+                                      ),
+                                    ) &&
+                                    d.isBefore(
+                                      selectedRange!.end.add(
+                                        const Duration(days: 1),
+                                      ),
+                                    );
+                              } catch (e) {
+                                return false;
+                              }
                             })
                             .toList();
 
@@ -402,8 +408,8 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                         double grandTotalSales = 0.0;
                         double grandProfit = 0.0;
                         double totalBillExpenses = 0.0;
-                        double shortEatsExpense = 0.0; // 🔥
-                        double shortEatsProfit = 0.0; // 🔥
+                        double shortEatsExpense = 0.0;
+                        double shortEatsProfit = 0.0;
                         Map<String, double> salesByDate = {};
                         Map<String, int> topProducts = {};
 
@@ -436,25 +442,24 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                               0;
                         }
 
-                        // 🔥 Short Eats ගණනය කිරීම
+                        // --- කාල සීමාවට අදාළව Short Eats එකතුව ගණනය කිරීම ---
                         for (var doc in filteredShortEats) {
                           var data = doc.data() as Map<String, dynamic>;
-                          List items = data['items'] ?? [];
-                          for (var item in items) {
-                            shortEatsExpense +=
-                                double.tryParse(
-                                  item['total_supplier_pay']?.toString() ?? '0',
-                                ) ??
-                                0;
-                            shortEatsProfit +=
-                                double.tryParse(
-                                  item['total_profit']?.toString() ?? '0',
-                                ) ??
-                                0;
-                          }
+                          double currentPayout =
+                              double.tryParse(
+                                data['payout']?.toString() ?? '0',
+                              ) ??
+                              0;
+                          double currentProfit =
+                              double.tryParse(
+                                data['profit']?.toString() ?? '0',
+                              ) ??
+                              0;
+
+                          shortEatsExpense += currentPayout;
+                          shortEatsProfit += currentProfit;
                         }
 
-                        // Final Physical Cash Calculation
                         double physicalCash =
                             grandTotalSales -
                             totalBillExpenses -
@@ -466,12 +471,11 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                             _buildAppBar(
                               filteredOrders,
                               grandTotalSales,
-                              grandProfit +
-                                  shortEatsProfit, // 🔥 ලාභයට ShortEats එකතු කරයි
+                              grandProfit + shortEatsProfit,
                               topProducts,
                               totalBillExpenses,
-                              shortEatsExpense, // 🔥
-                              shortEatsProfit, // 🔥
+                              shortEatsExpense,
+                              shortEatsProfit,
                             ),
                             SliverToBoxAdapter(
                               child: Column(
@@ -480,11 +484,11 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                                     grandTotalSales,
                                     grandProfit + shortEatsProfit,
                                     physicalCash,
-                                  ), // 🔥
+                                  ),
                                   _buildShortEatsSummaryCard(
                                     shortEatsExpense,
                                     shortEatsProfit,
-                                  ), // 🔥 New Section
+                                  ),
                                   _buildBillSummaryCard(
                                     totalBillExpenses,
                                     filteredBills,
@@ -549,7 +553,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     );
   }
 
-  // 🔥 Short Eats සාරාංශ පුවරුව
+  // --- Short Eats සාරාංශ පුවරුව (තෝරාගත් කාලයට අනුව update වේ) ---
   Widget _buildShortEatsSummaryCard(double expense, double profit) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
@@ -645,11 +649,12 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
           const SizedBox(height: 10),
           if (bills.isEmpty)
             const Text(
-              "No bills paid today.",
+              "No bills paid in this period.",
               style: TextStyle(color: Colors.white24, fontSize: 12),
             )
           else
-            ...bills.map((b) {
+            ...bills.take(5).map((b) {
+              // දිග වැඩි වීම වැලැක්වීමට මුල් 5 පෙන්වයි
               var data = b.data() as Map<String, dynamic>;
               return Padding(
                 padding: const EdgeInsets.only(top: 5),
@@ -664,7 +669,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                       ),
                     ),
                     Text(
-                      "€${data['amount']}",
+                      "€${(double.tryParse(data['amount']?.toString() ?? '0') ?? 0).toStringAsFixed(2)}",
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 12,
@@ -698,8 +703,8 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     double profit,
     Map<String, int> top,
     double bills,
-    double shortEatsExpense, // 🔥
-    double shortEatsProfit, // 🔥
+    double shortEatsExpense,
+    double shortEatsProfit,
   ) => SliverAppBar(
     backgroundColor: Colors.transparent,
     elevation: 0,
@@ -724,7 +729,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
           bills,
           shortEatsExpense,
           shortEatsProfit,
-        ), // 🔥
+        ),
       ),
       const SizedBox(width: 10),
     ],
@@ -1016,6 +1021,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
 class Prism3DPainter extends CustomPainter {
   final Color baseColor;
   Prism3DPainter(this.baseColor);
+
   @override
   void paint(Canvas canvas, Size size) {
     if (size.height <= 0) return;

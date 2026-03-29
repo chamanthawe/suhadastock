@@ -17,7 +17,6 @@ class ProductDetailsScreen extends StatefulWidget {
 }
 
 class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
-  // --- Theme Color ---
   final Color darkGreen = const Color(0xFF1B5E20);
 
   late TextEditingController _nameController;
@@ -33,12 +32,9 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   final _profitAmountController = TextEditingController();
 
   bool isUpdating = false;
-  bool isLooseProduct = false; // Loose (Kg) ද යන්න හඳුනා ගැනීමට
+  bool isWeighted = false; // 🔥 "is_loose" වෙනුවට "is_weighted" ලෙස වෙනස් කළා
 
-  // 🔥 Short Eats Tracking Variable
   bool isShortEat = false;
-
-  // 🔥 Case Management Variables
   bool isCaseProduct = false;
   String linkedSingleProductId = "";
   String linkedSingleProductName = "";
@@ -66,7 +62,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
       text: _getMetaValue(meta, 'battistini_stock', defaultValue: "0"),
     );
 
-    _itemsPerCaseController = TextEditingController(text: "12"); // Default
+    _itemsPerCaseController = TextEditingController(text: "12");
 
     _taxController.text = _getMetaValue(meta, 'tax_rate', defaultValue: "10");
 
@@ -99,7 +95,9 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
       if (doc.exists && doc.data() != null) {
         var data = doc.data()!;
         setState(() {
-          isLooseProduct = data['is_loose'] ?? false;
+          // 🔥 Firestore එකෙන් is_weighted අගය කියවයි (is_loose තිබුණත් එය ගනී)
+          isWeighted = data['is_weighted'] ?? data['is_loose'] ?? false;
+
           _shopPriceController.text =
               data['shop_price']?.toString() ?? _shopPriceController.text;
           _discountPriceController.text =
@@ -110,15 +108,18 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
           _battistiniStockController.text =
               data['battistini_stock']?.toString() ?? "0";
 
-          // 🔐 Load Case Data
           isCaseProduct = data['is_case_product'] ?? false;
           linkedSingleProductId = data['linked_single_product_id'] ?? "";
           linkedSingleProductName = data['linked_single_product_name'] ?? "";
           _itemsPerCaseController.text = (data['items_per_case'] ?? 12)
               .toString();
 
-          // 🍔 Load Short Eats Data
           isShortEat = data['is_short_eat'] ?? false;
+
+          _costController.text =
+              data['cost_price']?.toString() ?? _costController.text;
+          _taxController.text =
+              data['tax_rate']?.toString() ?? _taxController.text;
         });
       }
     } catch (e) {
@@ -143,7 +144,6 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     super.dispose();
   }
 
-  // --- Helpers ---
   void _instantBarcodeSync() {
     if (_skuController.text.isNotEmpty) _syncToFirestoreLocally();
   }
@@ -193,7 +193,6 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     return found != null ? found['value'].toString() : defaultValue;
   }
 
-  // --- Calculations ---
   void _calculateProfitInitially() {
     double shopPrice = double.tryParse(_shopPriceController.text) ?? 0;
     double cost = double.tryParse(_costController.text) ?? 0;
@@ -243,23 +242,25 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     }
   }
 
-  // --- Main Sync Logic ---
   Future<void> _updateProduct() async {
     setState(() => isUpdating = true);
     final String productId = widget.product['id'].toString();
 
-    // දශම 3 Logic එක මෙතැනදී ක්‍රියාත්මක වේ
     dynamic cassiaStockValue;
     dynamic battistiniStockValue;
 
-    if (isLooseProduct) {
+    if (isWeighted) {
+      // Kg නිෂ්පාදන සඳහා (Double)
       double cVal = double.tryParse(_cassiaStockController.text) ?? 0.0;
       double bVal = double.tryParse(_battistiniStockController.text) ?? 0.0;
       cassiaStockValue = double.parse(cVal.toStringAsFixed(3));
       battistiniStockValue = double.parse(bVal.toStringAsFixed(3));
     } else {
-      cassiaStockValue = int.tryParse(_cassiaStockController.text) ?? 0;
-      battistiniStockValue = int.tryParse(_battistiniStockController.text) ?? 0;
+      // සාමාන්‍ය නිෂ්පාදන සඳහා (Int)
+      double cVal = double.tryParse(_cassiaStockController.text) ?? 0;
+      double bVal = double.tryParse(_battistiniStockController.text) ?? 0;
+      cassiaStockValue = cVal.toInt();
+      battistiniStockValue = bVal.toInt();
     }
 
     try {
@@ -273,15 +274,16 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
             'shop_price': _shopPriceController.text,
             'discount_price': _discountPriceController.text,
             'profit': _profitAmountController.text,
+            'cost_price': _costController.text,
+            'tax_rate': _taxController.text,
             'cassia_stock': cassiaStockValue,
             'battistini_stock': battistiniStockValue,
-            'is_loose': isLooseProduct,
+
+            // 🔥 is_weighted field එක මෙතනදී true/false ලෙස Save වේ
+            'is_weighted': isWeighted,
+
             'last_updated': FieldValue.serverTimestamp(),
-
-            // 🍔 Short Eat Persistence
             'is_short_eat': isShortEat,
-
-            // 🛠️ Case Management Persistence
             'is_case_product': isCaseProduct,
             'linked_single_product_id': linkedSingleProductId,
             'linked_single_product_name': linkedSingleProductName,
@@ -301,13 +303,16 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
           {"key": "cost_price", "value": _costController.text},
           {"key": "tax_rate", "value": _taxController.text},
           {"key": "profit", "value": _profitAmountController.text},
-          {"key": "is_loose", "value": isLooseProduct ? "yes" : "no"},
+
+          // WooCommerce වෙතද is_weighted ලෙසම යවයි
+          {"key": "is_weighted", "value": isWeighted ? "yes" : "no"},
+
           {"key": "is_case_product", "value": isCaseProduct ? "yes" : "no"},
         ],
       };
 
-      if (isLooseProduct) {
-        body["manage_stock"] = false; // Kg නම් Woocommerce stock disable කරයි
+      if (isWeighted) {
+        body["manage_stock"] = false;
       } else {
         body["manage_stock"] = true;
         body["stock_quantity"] = cassiaStockValue;
@@ -330,25 +335,10 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
           ),
         );
         Navigator.pop(context, {
-          ...widget.product, // පරණ දත්ත ඔක්කොම ගන්නවා
+          ...widget.product,
           'name': _nameController.text,
           'sku': _skuController.text.trim(),
-          'stock_quantity': isLooseProduct
-              ? double.parse(_cassiaStockController.text)
-              : int.parse(_cassiaStockController.text),
-          'meta_data': [
-            ...widget.product['meta_data'] ?? [], // පරණ meta දත්ත
-            {'key': 'shop_price', 'value': _shopPriceController.text},
-            {'key': 'cassia_stock', 'value': _cassiaStockController.text},
-            {
-              'key': 'battistini_stock',
-              'value': _battistiniStockController.text,
-            },
-            {'key': 'is_case_product', 'value': isCaseProduct ? 'yes' : 'no'},
-            {'key': 'cost_price', 'value': _costController.text},
-            {'key': 'tax_rate', 'value': _taxController.text},
-            {'key': 'profit', 'value': _profitAmountController.text},
-          ],
+          'stock_quantity': cassiaStockValue,
         });
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -364,7 +354,6 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     }
   }
 
-  // 🔥 Case Picker Model UI
   void _openSingleProductSearchPicker() {
     String searchQuery = "";
     showModalBottomSheet(
@@ -406,20 +395,13 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                       .collection('products_data')
                       .snapshots(),
                   builder: (context, snapshot) {
-                    if (!snapshot.hasData) {
+                    if (!snapshot.hasData)
                       return const Center(child: CircularProgressIndicator());
-                    }
-
                     final docs = snapshot.data!.docs.where((doc) {
                       final data = doc.data() as Map<String, dynamic>;
                       final name = data['name']?.toString().toLowerCase() ?? "";
                       return name.contains(searchQuery.toLowerCase());
                     }).toList();
-
-                    if (docs.isEmpty) {
-                      return const Center(child: Text("No products found"));
-                    }
-
                     return ListView.builder(
                       itemCount: docs.length,
                       itemBuilder: (context, index) {
@@ -482,21 +464,21 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                       Icons.inventory_2,
                     ),
                     _buildBarcodeField(),
+
+                    // 🔥 UI එකේ Button එක (නම සහ Variable එක වෙනස් කළා)
                     SwitchListTile(
                       title: const Text(
-                        "Is Loose Product (Kg)?",
+                        "Sell by Weight (Kg)?",
                         style: TextStyle(fontWeight: FontWeight.bold),
                       ),
                       subtitle: const Text(
                         "Sell by weight with 3 decimal precision",
                       ),
-                      value: isLooseProduct,
+                      value: isWeighted,
                       activeColor: darkGreen,
                       onChanged: (val) {
                         setState(() {
-                          isLooseProduct = val;
-
-                          // Switch එක OFF කරපු ගමන් දැනට තියෙන දශම අයින් කරනවා
+                          isWeighted = val;
                           if (!val) {
                             double currentVal =
                                 double.tryParse(_cassiaStockController.text) ??
@@ -504,7 +486,6 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                             _cassiaStockController.text = currentVal
                                 .toInt()
                                 .toString();
-
                             double currentBVal =
                                 double.tryParse(
                                   _battistiniStockController.text,
@@ -518,7 +499,6 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                       },
                     ),
 
-                    // 🔥 🍔 Short Eats Switch (Added Area)
                     SwitchListTile(
                       title: const Text(
                         "Is this a Short Eat?",
@@ -531,7 +511,6 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                     ),
                   ]),
 
-                  // 🔥 🛠️ Case Management Card (Added Section)
                   _buildCard("CASE TO SINGLE PRODUCT MAPPING", [
                     SwitchListTile(
                       title: const Text(
@@ -579,34 +558,32 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                     ],
                   ]),
 
-                  _buildCard(
-                    "STOCK CONTROL (${isLooseProduct ? 'Kg' : 'Qty'})",
-                    [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _buildTextField(
-                              _cassiaStockController,
-                              "Cassia Stock",
-                              Icons.warehouse,
-                              isNumber: true,
-                              isDecimal: isLooseProduct,
-                            ),
+                  _buildCard("STOCK CONTROL (${isWeighted ? 'Kg' : 'Qty'})", [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildTextField(
+                            _cassiaStockController,
+                            "Cassia Stock",
+                            Icons.warehouse,
+                            isNumber: true,
+                            isDecimal: isWeighted,
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildTextField(
-                              _battistiniStockController,
-                              "Battistini Stock",
-                              Icons.storefront,
-                              isNumber: true,
-                              isDecimal: isLooseProduct,
-                            ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildTextField(
+                            _battistiniStockController,
+                            "Battistini Stock",
+                            Icons.storefront,
+                            isNumber: true,
+                            isDecimal: isWeighted,
                           ),
-                        ],
-                      ),
-                    ],
-                  ),
+                        ),
+                      ],
+                    ),
+                  ]),
+
                   _buildCard("PRICE & PROFIT ANALYSIS", [
                     _buildTextField(
                       _costController,
@@ -667,7 +644,6 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     );
   }
 
-  // --- UI Components ---
   Widget _buildTopImageSection(String url) => Container(
     width: double.infinity,
     height: 200,
