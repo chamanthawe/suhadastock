@@ -59,6 +59,9 @@ class _OrderScreenState extends State<OrderScreen> {
   bool _isCheckingConnectivity = false;
   Timer? _connectivityTimer;
 
+  // --- Loyalty Customer Variable ---
+  Map<String, dynamic>? _selectedLoyalCustomer;
+
   List<Map<String, dynamic>?> quickProducts = List.filled(50, null);
   Map<String, List<Map<String, dynamic>?>> categoryQuickItems = {
     "Short Eats": List.filled(6, null),
@@ -245,13 +248,62 @@ class _OrderScreenState extends State<OrderScreen> {
           child: Scaffold(
             backgroundColor: Colors.white,
             appBar: AppBar(
-              title: Text(
-                "${widget.selectedShop} POS",
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
+              title: Row(
+                children: [
+                  Text(
+                    "${widget.selectedShop} POS",
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  if (_selectedLoyalCustomer != null) ...[
+                    const SizedBox(width: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.person,
+                            size: 14,
+                            color: Colors.white,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            "${_selectedLoyalCustomer!['name']}",
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _selectedLoyalCustomer = null;
+                                _calculateTotal();
+                              });
+                            },
+                            child: const Icon(
+                              Icons.cancel,
+                              size: 16,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
               ),
               toolbarHeight: 45,
               backgroundColor: primaryGreen,
@@ -305,14 +357,12 @@ class _OrderScreenState extends State<OrderScreen> {
                                 setState(() {
                                   if (globalCart[index]['qty'] > 1) {
                                     globalCart[index]['qty']--;
-                                    globalCart[index]['finalPrice'] =
-                                        globalCart[index]['qty'] *
-                                        globalCart[index]['price'];
+                                    _calculateTotal();
                                   } else {
                                     globalCart.removeAt(index);
+                                    _calculateTotal();
                                   }
                                 });
-                                _calculateTotal();
                               },
                               onLongPressTotal: () => setState(
                                 () => _showSecretProfit = !_showSecretProfit,
@@ -483,6 +533,7 @@ class _OrderScreenState extends State<OrderScreen> {
               setState(() {
                 globalCart.clear();
                 globalDiscount = 0;
+                _selectedLoyalCustomer = null;
               });
               _calculateTotal();
             },
@@ -603,7 +654,35 @@ class _OrderScreenState extends State<OrderScreen> {
     String cleanBarcode = barcode.trim().replaceAll(RegExp(r'[\n\r]'), '');
     if (cleanBarcode.isEmpty) return;
 
-    // --- පවතින Pending Order එකක්දැයි පරීක්ෂා කිරීම (ID එක දිග නිසා මුලින්ම මෙය බලයි) ---
+    // --- 1. Customer Scan Check ---
+    try {
+      var customerQuery = await FirebaseFirestore.instance
+          .collection('loyal_customers')
+          .where('barcode', isEqualTo: cleanBarcode)
+          .get();
+
+      if (customerQuery.docs.isNotEmpty) {
+        var customerData = customerQuery.docs.first.data();
+        setState(() {
+          _selectedLoyalCustomer = customerData;
+          _calculateTotal();
+        });
+        _barcodeBuffer = "";
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "Loyalty Active: ${customerData['name']} ${customerData['surname']}",
+            ),
+            backgroundColor: Colors.green[800],
+          ),
+        );
+        return;
+      }
+    } catch (e) {
+      debugPrint("Loyalty Error: $e");
+    }
+
+    // --- 2. Pending Order Scan (ID 15+) ---
     if (cleanBarcode.length >= 15) {
       try {
         var pendingDoc = await FirebaseFirestore.instance
@@ -616,7 +695,6 @@ class _OrderScreenState extends State<OrderScreen> {
           List items = data['items'] ?? [];
 
           setState(() {
-            // පවතින Cart එක Clear නොකර අලුත් items එකතු කරයි
             for (var item in items) {
               double itemPrice =
                   double.tryParse(item['price'].toString()) ?? 0.0;
@@ -625,7 +703,7 @@ class _OrderScreenState extends State<OrderScreen> {
               globalCart.add({
                 'id':
                     item['sku'] ??
-                    'manual_${DateTime.now().millisecondsSinceEpoch}', // SKU එක ID එක ලෙස ගනී
+                    'manual_${DateTime.now().millisecondsSinceEpoch}',
                 'name': item['name'] ?? 'No Name',
                 'price': itemPrice,
                 'qty': itemQty,
@@ -642,8 +720,6 @@ class _OrderScreenState extends State<OrderScreen> {
 
           _calculateTotal();
           _scrollToBottom();
-
-          // එකවරක් Scan කළ පසු Firestore එකෙන් එම Order එක ඉවත් කරයි (නැවත Scan කිරීම වැළැක්වීමට)
           await FirebaseFirestore.instance
               .collection('pending_orders')
               .doc(cleanBarcode)
@@ -651,20 +727,20 @@ class _OrderScreenState extends State<OrderScreen> {
 
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text("Mobile Order Added to Cart!"),
+              content: Text("Mobile Order Added!"),
               backgroundColor: Colors.green,
             ),
           );
 
           _barcodeBuffer = "";
-          return; // මෙතනින් නවතියි, පහල තියෙන Product search එකට යන්නේ නැත.
+          return;
         }
       } catch (e) {
-        debugPrint("Pending Order Scan Error: $e");
+        debugPrint("Pending Error: $e");
       }
     }
 
-    // --- සාමාන්‍ය Product Barcode Search කොටස (ඔයාගේ කලින් තිබූ code එකමයි) ---
+    // --- 3. Normal Product Barcode Search ---
     List<Map<String, dynamic>> matchingProducts = _localProductCache.values
         .where((p) {
           String pBarcode = p['barcode'].toString().trim();
@@ -782,22 +858,54 @@ class _OrderScreenState extends State<OrderScreen> {
         tempT += (item['finalPrice'] as double);
         continue;
       }
+
       var cached = _localProductCache[item['id'].toString()];
-      double normalPrice =
+      double shopPrice =
           double.tryParse(
             cached?['price']?.toString() ?? item['price'].toString(),
           ) ??
           0.0;
-      double discountPrice =
-          double.tryParse(cached?['discount_price']?.toString() ?? "0.0") ??
-          0.0;
-      double unitPrice = (discountPrice > 0) ? discountPrice : normalPrice;
+      double unitPrice = shopPrice;
+      bool applied = false;
+
+      // Loyalty logic integration
+      if (_selectedLoyalCustomer != null) {
+        bool isLoyal = _selectedLoyalCustomer!['loyal_discount'] ?? false;
+        bool isBusiness =
+            _selectedLoyalCustomer!['special_for_business'] ?? false;
+        List<dynamic> businessPrices =
+            _selectedLoyalCustomer!['business_pricing'] ?? [];
+
+        if (isBusiness) {
+          var specialMatch = businessPrices.firstWhere(
+            (bp) => bp['p_id'].toString() == item['id'].toString(),
+            orElse: () => null,
+          );
+          if (specialMatch != null) {
+            unitPrice =
+                double.tryParse(specialMatch['p_price'].toString()) ??
+                shopPrice;
+            applied = true;
+          }
+        }
+
+        // --- Logic fix: Apply discount_price if loyal and no business price was applied ---
+        if (!applied && isLoyal) {
+          double dPrice =
+              double.tryParse(cached?['discount_price']?.toString() ?? "0.0") ??
+              0.0;
+          if (dPrice > 0) {
+            unitPrice = dPrice;
+            applied = true;
+          }
+        }
+      }
+
       double unitProfit =
           double.tryParse(cached?['profit']?.toString() ?? '0.0') ?? 0.0;
       item['price'] = unitPrice;
-      item['original_price'] = (discountPrice > 0) ? normalPrice : 0.0;
+      item['original_price'] = applied ? shopPrice : 0.0;
 
-      // දශම 3කට සකසයි
       double currentQty = double.parse(
         (item['qty'] as double).toStringAsFixed(3),
       );
@@ -808,6 +916,7 @@ class _OrderScreenState extends State<OrderScreen> {
       tempT += item['finalPrice'];
       tempP += (unitProfit * currentQty);
     }
+
     if (mounted) {
       setState(() {
         totalValue = double.parse(
@@ -831,7 +940,6 @@ class _OrderScreenState extends State<OrderScreen> {
         : 0.0;
     bool isWeighted = _rawInput > 0;
 
-    // Qty එක දශම 3කට සීමා කරයි
     double rawQty = isWeighted ? (_rawInput / 1000.0) : 1.0;
     double inputQty = double.parse(rawQty.toStringAsFixed(3));
 
@@ -841,15 +949,6 @@ class _OrderScreenState extends State<OrderScreen> {
     }
 
     var cached = _localProductCache[p['id'].toString()];
-    double normalPrice =
-        double.tryParse(
-          cached?['price']?.toString() ?? p['price'].toString(),
-        ) ??
-        0.0;
-    double discountPrice =
-        double.tryParse(cached?['discount_price']?.toString() ?? "0.0") ?? 0.0;
-    double unitPrice = (discountPrice > 0) ? discountPrice : normalPrice;
-
     String imgURL =
         (cached != null && cached['image'] != null && cached['image'] != "")
         ? cached['image'].toString()
@@ -861,17 +960,17 @@ class _OrderScreenState extends State<OrderScreen> {
         globalCart[existingIdx]['qty'] = double.parse(
           newQty.toStringAsFixed(3),
         );
-        globalCart[existingIdx]['finalPrice'] = double.parse(
-          (globalCart[existingIdx]['qty'] * unitPrice).toStringAsFixed(2),
-        );
       } else {
         globalCart.add({
           'id': p['id'],
           'name': name,
-          'price': unitPrice,
-          'original_price': (discountPrice > 0) ? normalPrice : 0.0,
+          'price':
+              double.tryParse(
+                cached?['price']?.toString() ?? p['price'].toString(),
+              ) ??
+              0.0,
           'qty': inputQty,
-          'finalPrice': double.parse((unitPrice * inputQty).toStringAsFixed(2)),
+          'finalPrice': 0.0,
           'isWeighted': isWeighted || (p['is_weighted'] == true),
           'sku': p['sku'],
           'manage_stock': true,
@@ -1213,23 +1312,16 @@ class _OrderScreenState extends State<OrderScreen> {
 
     for (var item in items) {
       if (item['id'].toString().contains('manual')) continue;
-
       bool isBat = widget.selectedShop.toLowerCase().contains("battistini");
       String targetKey = isBat ? "battistini_stock" : "cassia_stock";
-
       var cachedItem = _localProductCache[item['id'].toString()];
       bool isWeightedProduct =
           (item['isWeighted'] == true) ||
           (item['is_weighted'] == true) ||
           (cachedItem != null && cachedItem['is_weighted'] == true);
-
       if (!isWeightedProduct) {
         int qtyToSync = (item['qty'] as num).toInt();
         await TimeSync().addOrder(item, qtyToSync, targetKey);
-      } else {
-        debugPrint(
-          "Skipping WooCommerce Sync for Weighted Item: ${item['name']}",
-        );
       }
     }
     _updateWooStockFast(items);
@@ -1238,28 +1330,18 @@ class _OrderScreenState extends State<OrderScreen> {
   Future<void> _updateWooStockFast(List<Map<String, dynamic>> items) async {
     for (var item in items) {
       if (item['id'].toString().contains('manual')) continue;
-
       var cachedItem = _localProductCache[item['id'].toString()];
       bool isWeightedProduct =
           (item['isWeighted'] == true) ||
           (item['is_weighted'] == true) ||
           (cachedItem != null && cachedItem['is_weighted'] == true);
-
-      dynamic soldQty;
-      if (isWeightedProduct) {
-        // බර දශම 3කට සකසා යවයි
-        soldQty = double.parse(
-          (item['qty'] as num).toDouble().toStringAsFixed(3),
-        );
-      } else {
-        soldQty = (item['qty'] as num).toInt();
-      }
-
+      dynamic soldQty = isWeightedProduct
+          ? double.parse((item['qty'] as num).toDouble().toStringAsFixed(3))
+          : (item['qty'] as num).toInt();
       String targetKey =
           widget.selectedShop.toLowerCase().contains("battistini")
           ? "battistini_stock"
           : "cassia_stock";
-
       try {
         await FirebaseFirestore.instance
             .collection('products_data')
@@ -1283,6 +1365,7 @@ class _OrderScreenState extends State<OrderScreen> {
       _lowStockProduct = null;
       _showCaseBreakButton = false;
       _detectedCaseProduct = null;
+      _selectedLoyalCustomer = null;
     });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1386,13 +1469,6 @@ class _OrderScreenState extends State<OrderScreen> {
         });
       });
     }
-  }
-
-  Future<void> _saveCategorySettings() async {
-    await FirebaseFirestore.instance
-        .collection('settings')
-        .doc('category_items')
-        .set(categoryQuickItems);
   }
 
   void _showQuickActionPicker(String categoryName) {
@@ -1566,7 +1642,10 @@ class _OrderScreenState extends State<OrderScreen> {
                           'sku': res[i]['sku'],
                         };
                       });
-                      _saveCategorySettings();
+                      FirebaseFirestore.instance
+                          .collection('settings')
+                          .doc('category_items')
+                          .set(categoryQuickItems);
                       setDialogState(() {});
                       Navigator.pop(ctx);
                     },

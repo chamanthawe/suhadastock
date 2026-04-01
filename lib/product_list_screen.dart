@@ -15,6 +15,7 @@ import 'bill_management_screen.dart';
 import 'branch_finance_screen.dart';
 import 'constants.dart';
 import 'customer_list_screen.dart';
+import 'loyal_customers/loyal_customer_list.dart';
 import 'mobile_order_screen.dart';
 import 'order_request_screen.dart';
 import 'order_screen.dart';
@@ -512,6 +513,14 @@ class _ProductListScreenState extends State<ProductListScreen>
                   MaterialPageRoute(builder: (_) => const CustomerListScreen()),
                 ),
               ),
+              ListTile(
+                leading: Icon(Icons.person, color: darkGreen),
+                title: const Text("Loyal Customers"),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoyalCustomerList()),
+                ),
+              ),
             ],
           ),
         ),
@@ -916,9 +925,7 @@ class _ProductListScreenState extends State<ProductListScreen>
                   label: const Text("MANAGE BILLS"),
                   onPressed: () => Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => const BillManagementScreen(),
-                    ),
+                    MaterialPageRoute(builder: (_) => BillManagementScreen()),
                   ),
                 ),
                 const SizedBox(height: 15),

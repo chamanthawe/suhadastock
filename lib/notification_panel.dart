@@ -14,7 +14,10 @@ class NotificationPanel extends StatelessWidget {
     final Color secondaryGreen = const Color(0xFF2E7D32);
     final Color accentOrange = const Color(0xFFFF8F00);
     final Color creditRed = const Color(0xFFD32F2F);
-    final Color billGreen = const Color(0xFF2E7D32); // බිල් සඳහා කොළ පාට
+    final Color billGreen = const Color(0xFF2E7D32);
+    final Color paymentBlue = const Color(
+      0xFF1976D2,
+    ); // 🔵 Payment සඳහා නිල් පාට
 
     return Scaffold(
       backgroundColor: const Color(0xFFF1F5F1),
@@ -101,7 +104,9 @@ class NotificationPanel extends StatelessWidget {
 
               // Notification වර්ග හඳුනාගැනීම
               bool isCredit = data['type'] == 'credit_order';
-              bool isBill = data['type'] == 'bill_entry'; // 👈 නව බිල් වර්ගය
+              bool isBill = data['type'] == 'bill_entry';
+              bool isPayment =
+                  data['type'] == 'payment_received'; // 👈 අලුත් වර්ගය
 
               DateTime? date = (data['timestamp'] as Timestamp?)?.toDate();
               String timeStr = date != null
@@ -152,7 +157,11 @@ class NotificationPanel extends StatelessWidget {
                             width: 6,
                             color: isCredit
                                 ? creditRed
-                                : (isBill ? billGreen : accentOrange),
+                                : (isBill
+                                      ? billGreen
+                                      : (isPayment
+                                            ? paymentBlue
+                                            : accentOrange)),
                           ),
 
                           // Image හෝ Icon Section
@@ -172,9 +181,11 @@ class NotificationPanel extends StatelessWidget {
                                 data,
                                 isCredit,
                                 isBill,
+                                isPayment, // 👈 pass කළා
                                 creditRed,
                                 primaryGreen,
                                 billGreen,
+                                paymentBlue, // 👈 pass කළා
                               ),
                             ),
                           ),
@@ -189,24 +200,30 @@ class NotificationPanel extends StatelessWidget {
                                 children: [
                                   // Title
                                   Text(
-                                    isCredit
-                                        ? "New Credit Order"
-                                        : (isBill
-                                              ? "Bill: ${data['bill_name']}"
-                                              : (data['productName'] ??
-                                                    "Unknown")),
+                                    isPayment
+                                        ? "Payment Received" // 👈 Title
+                                        : (isCredit
+                                              ? "New Credit Order"
+                                              : (isBill
+                                                    ? "Bill: ${data['bill_name']}"
+                                                    : (data['productName'] ??
+                                                          "Unknown"))),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 16,
-                                      color: isCredit
-                                          ? creditRed
-                                          : (isBill ? billGreen : primaryGreen),
+                                      color: isPayment
+                                          ? paymentBlue
+                                          : (isCredit
+                                                ? creditRed
+                                                : (isBill
+                                                      ? billGreen
+                                                      : primaryGreen)),
                                     ),
                                   ),
 
-                                  if (isCredit) ...[
+                                  if (isCredit || isPayment) ...[
                                     const SizedBox(height: 2),
                                     Text(
                                       "Customer: ${data['name'] ?? 'Unknown'}",
@@ -231,23 +248,29 @@ class NotificationPanel extends StatelessWidget {
                                               ? Colors.red[50]
                                               : (isBill
                                                     ? Colors.green[50]
-                                                    : Colors.orange[50]),
+                                                    : (isPayment
+                                                          ? Colors.blue[50]
+                                                          : Colors.orange[50])),
                                           borderRadius: BorderRadius.circular(
                                             6,
                                           ),
                                         ),
                                         child: Text(
-                                          isCredit
-                                              ? "Amount: €${data['last_order_amount'] ?? '0.00'}"
-                                              : (isBill
-                                                    ? "Paid: €${data['amount'] ?? '0.00'}"
-                                                    : "Stock: ${data['remainingStock'] ?? '0'}"),
+                                          isPayment
+                                              ? "Paid: €${data['amount'] ?? '0.00'}" // 👈 Amount
+                                              : (isCredit
+                                                    ? "Amount: €${data['last_order_amount'] ?? '0.00'}"
+                                                    : (isBill
+                                                          ? "Paid: €${data['amount'] ?? '0.00'}"
+                                                          : "Stock: ${data['remainingStock'] ?? '0'}")),
                                           style: TextStyle(
-                                            color: isCredit
-                                                ? creditRed
-                                                : (isBill
-                                                      ? billGreen
-                                                      : Colors.red),
+                                            color: isPayment
+                                                ? paymentBlue
+                                                : (isCredit
+                                                      ? creditRed
+                                                      : (isBill
+                                                            ? billGreen
+                                                            : Colors.red)),
                                             fontWeight: FontWeight.bold,
                                             fontSize: 12,
                                           ),
@@ -305,9 +328,11 @@ class NotificationPanel extends StatelessWidget {
     Map<String, dynamic> data,
     bool isCredit,
     bool isBill,
+    bool isPayment, // 👈 එකතු කළා
     Color creditRed,
     Color primaryGreen,
     Color billGreen,
+    Color paymentBlue, // 👈 එකතු කළා
   ) {
     // 1. Network Image එකක් ඇත්නම් (Stock items සඳහා)
     if (data['imageUrl'] != null && data['imageUrl'] != "") {
@@ -335,10 +360,17 @@ class NotificationPanel extends StatelessWidget {
     }
     // 3. කිසිවක් නැත්නම් Default Icon එක
     return Icon(
-      isCredit
-          ? Icons.account_balance_wallet_rounded
-          : (isBill ? Icons.receipt_long_rounded : Icons.inventory_2_rounded),
-      color: isCredit ? creditRed : (isBill ? billGreen : primaryGreen),
+      isPayment
+          ? Icons
+                .payments_rounded // 👈 Payment Icon
+          : (isCredit
+                ? Icons.account_balance_wallet_rounded
+                : (isBill
+                      ? Icons.receipt_long_rounded
+                      : Icons.inventory_2_rounded)),
+      color: isPayment
+          ? paymentBlue
+          : (isCredit ? creditRed : (isBill ? billGreen : primaryGreen)),
       size: 30,
     );
   }

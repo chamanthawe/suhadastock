@@ -104,9 +104,22 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
               data['discount_price']?.toString() ?? "0.00";
           _profitAmountController.text =
               data['profit']?.toString() ?? _profitAmountController.text;
-          _cassiaStockController.text = data['cassia_stock']?.toString() ?? "0";
-          _battistiniStockController.text =
-              data['battistini_stock']?.toString() ?? "0";
+
+          // --- දශම තිතට පස්සේ ඉලක්කම් 3ක් පෙන්වීමට මෙතනදී format කරන ලදී ---
+          if (isWeighted) {
+            double cStock =
+                double.tryParse(data['cassia_stock']?.toString() ?? "0") ?? 0.0;
+            double bStock =
+                double.tryParse(data['battistini_stock']?.toString() ?? "0") ??
+                0.0;
+            _cassiaStockController.text = cStock.toStringAsFixed(3);
+            _battistiniStockController.text = bStock.toStringAsFixed(3);
+          } else {
+            _cassiaStockController.text =
+                data['cassia_stock']?.toString() ?? "0";
+            _battistiniStockController.text =
+                data['battistini_stock']?.toString() ?? "0";
+          }
 
           isCaseProduct = data['is_case_product'] ?? false;
           linkedSingleProductId = data['linked_single_product_id'] ?? "";

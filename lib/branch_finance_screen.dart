@@ -20,6 +20,53 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
   final Color accentGreen = const Color(0xFF00E676);
   DateTimeRange? selectedRange;
 
+  // --- 🚀 පරණ Slow Loop එක වෙනුවට අලුත් Optimized Function එක ---
+  Future<double> _calculateCustomerPayments(String today) async {
+    double total = 0.0;
+
+    if (selectedRange == null) {
+      // අද දවසේ summary එක පමණක් කෙලින්ම කියවීම (ඉතා වේගවත්)
+      var doc = await FirebaseFirestore.instance
+          .collection('daily_reports')
+          .doc("${widget.branchName}_$today")
+          .get();
+      if (doc.exists) {
+        total =
+            double.tryParse(
+              doc.data()?['total_customer_payments']?.toString() ?? '0',
+            ) ??
+            0.0;
+      }
+    } else {
+      // Date Range එකක් තෝරා ඇති විට අදාළ දවස්වල summary ලේඛන පමණක් කියවීම
+      var reports = await FirebaseFirestore.instance
+          .collection('daily_reports')
+          .where('shop', isEqualTo: widget.branchName)
+          .where(
+            'date',
+            isGreaterThanOrEqualTo: DateFormat(
+              'yyyy-MM-dd',
+            ).format(selectedRange!.start),
+          )
+          .where(
+            'date',
+            isLessThanOrEqualTo: DateFormat(
+              'yyyy-MM-dd',
+            ).format(selectedRange!.end),
+          )
+          .get();
+
+      for (var doc in reports.docs) {
+        total +=
+            double.tryParse(
+              doc.data()['total_customer_payments']?.toString() ?? '0',
+            ) ??
+            0.0;
+      }
+    }
+    return total;
+  }
+
   // --- Card Machine මුදල ලබාගන්නා Dialog එක ---
   Future<void> _showCardAmountDialog(
     List<QueryDocumentSnapshot> docs,
@@ -29,6 +76,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     double totalBills,
     double shortEatsExpense,
     double shortEatsProfit,
+    double customerPayments,
   ) async {
     final TextEditingController cardController = TextEditingController(
       text: "0.00",
@@ -100,6 +148,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                 cardAmount,
                 shortEatsExpense,
                 shortEatsProfit,
+                customerPayments,
               );
             },
             child: const Text(
@@ -163,6 +212,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     double cardAmount,
     double shortEatsExpense,
     double shortEatsProfit,
+    double customerPayments,
   ) async {
     final pdf = pw.Document();
     final dateStr = DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now());
@@ -239,6 +289,10 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
               headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
               data: [
                 ['Total Sales', totalSales.toStringAsFixed(2)],
+                [
+                  'Customer Payments Recv. (+)',
+                  customerPayments.toStringAsFixed(2),
+                ],
                 ['Card Machine Total (-)', cardAmount.toStringAsFixed(2)],
                 ['Bill Expenses (-)', totalBills.toStringAsFixed(2)],
                 [
@@ -247,7 +301,11 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                 ],
                 [
                   'Final Physical Cash Balance',
-                  (totalSales - totalBills - cardAmount - shortEatsExpense)
+                  (totalSales +
+                          customerPayments -
+                          totalBills -
+                          cardAmount -
+                          shortEatsExpense)
                       .toStringAsFixed(2),
                 ],
                 [
@@ -375,7 +433,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                               );
                         }).toList();
 
-                        // --- Short Eats Settlements Filtering (සීමාව අනුව නිවැරදිව පෙරීම) ---
+                        // --- Short Eats Settlements Filtering ---
                         var filteredShortEats = shortEatSnapshot.data!.docs
                             .where((doc) {
                               String dStr = doc['date'] ?? "";
@@ -400,131 +458,138 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
                             })
                             .toList();
 
-                        filteredOrders.sort(
-                          (a, b) =>
-                              (b['time'] ?? "").compareTo(a['time'] ?? ""),
-                        );
+                        // --- 🔥 Customer Payments Calculating (Now Optimized) ---
+                        return FutureBuilder<double>(
+                          future: _calculateCustomerPayments(today),
+                          builder: (context, paymentSnapshot) {
+                            double totalCustomerPayments =
+                                paymentSnapshot.data ?? 0.0;
 
-                        double grandTotalSales = 0.0;
-                        double grandProfit = 0.0;
-                        double totalBillExpenses = 0.0;
-                        double shortEatsExpense = 0.0;
-                        double shortEatsProfit = 0.0;
-                        Map<String, double> salesByDate = {};
-                        Map<String, int> topProducts = {};
+                            filteredOrders.sort(
+                              (a, b) =>
+                                  (b['time'] ?? "").compareTo(a['time'] ?? ""),
+                            );
 
-                        for (var doc in filteredOrders) {
-                          var data = doc.data() as Map<String, dynamic>;
-                          double total =
-                              double.tryParse(
-                                data['total_sales']?.toString() ??
-                                    data['total']?.toString() ??
-                                    '0',
-                              ) ??
-                              0;
-                          grandTotalSales += total;
-                          grandProfit += _calculateOrderProfit(data);
-                          salesByDate[data['date']] =
-                              (salesByDate[data['date']] ?? 0) + total;
-                          List items = data['items'] ?? [];
-                          for (var i in items) {
-                            topProducts[i['name']] =
-                                (topProducts[i['name']] ?? 0) +
-                                (int.tryParse(i['qty'].toString()) ?? 1);
-                          }
-                        }
-                        for (var doc in filteredBills) {
-                          var data = doc.data() as Map<String, dynamic>;
-                          totalBillExpenses +=
-                              double.tryParse(
-                                data['amount']?.toString() ?? '0',
-                              ) ??
-                              0;
-                        }
+                            double grandTotalSales = 0.0;
+                            double grandProfit = 0.0;
+                            double totalBillExpenses = 0.0;
+                            double shortEatsExpense = 0.0;
+                            double shortEatsProfit = 0.0;
+                            Map<String, double> salesByDate = {};
+                            Map<String, int> topProducts = {};
 
-                        // --- කාල සීමාවට අදාළව Short Eats එකතුව ගණනය කිරීම ---
-                        for (var doc in filteredShortEats) {
-                          var data = doc.data() as Map<String, dynamic>;
-                          double currentPayout =
-                              double.tryParse(
-                                data['payout']?.toString() ?? '0',
-                              ) ??
-                              0;
-                          double currentProfit =
-                              double.tryParse(
-                                data['profit']?.toString() ?? '0',
-                              ) ??
-                              0;
+                            for (var doc in filteredOrders) {
+                              var data = doc.data() as Map<String, dynamic>;
+                              double total =
+                                  double.tryParse(
+                                    data['total_sales']?.toString() ??
+                                        data['total']?.toString() ??
+                                        '0',
+                                  ) ??
+                                  0;
+                              grandTotalSales += total;
+                              grandProfit += _calculateOrderProfit(data);
+                              salesByDate[data['date']] =
+                                  (salesByDate[data['date']] ?? 0) + total;
+                              List items = data['items'] ?? [];
+                              for (var i in items) {
+                                topProducts[i['name']] =
+                                    (topProducts[i['name']] ?? 0) +
+                                    (int.tryParse(i['qty'].toString()) ?? 1);
+                              }
+                            }
+                            for (var doc in filteredBills) {
+                              var data = doc.data() as Map<String, dynamic>;
+                              totalBillExpenses +=
+                                  double.tryParse(
+                                    data['amount']?.toString() ?? '0',
+                                  ) ??
+                                  0;
+                            }
+                            for (var doc in filteredShortEats) {
+                              var data = doc.data() as Map<String, dynamic>;
+                              shortEatsExpense +=
+                                  double.tryParse(
+                                    data['payout']?.toString() ?? '0',
+                                  ) ??
+                                  0;
+                              shortEatsProfit +=
+                                  double.tryParse(
+                                    data['profit']?.toString() ?? '0',
+                                  ) ??
+                                  0;
+                            }
 
-                          shortEatsExpense += currentPayout;
-                          shortEatsProfit += currentProfit;
-                        }
+                            double physicalCash =
+                                grandTotalSales +
+                                totalCustomerPayments -
+                                totalBillExpenses -
+                                shortEatsExpense;
 
-                        double physicalCash =
-                            grandTotalSales -
-                            totalBillExpenses -
-                            shortEatsExpense;
-
-                        return CustomScrollView(
-                          physics: const BouncingScrollPhysics(),
-                          slivers: [
-                            _buildAppBar(
-                              filteredOrders,
-                              grandTotalSales,
-                              grandProfit + shortEatsProfit,
-                              topProducts,
-                              totalBillExpenses,
-                              shortEatsExpense,
-                              shortEatsProfit,
-                            ),
-                            SliverToBoxAdapter(
-                              child: Column(
-                                children: [
-                                  _build3DSummary(
-                                    grandTotalSales,
-                                    grandProfit + shortEatsProfit,
-                                    physicalCash,
+                            return CustomScrollView(
+                              physics: const BouncingScrollPhysics(),
+                              slivers: [
+                                _buildAppBar(
+                                  filteredOrders,
+                                  grandTotalSales,
+                                  grandProfit + shortEatsProfit,
+                                  topProducts,
+                                  totalBillExpenses,
+                                  shortEatsExpense,
+                                  shortEatsProfit,
+                                  totalCustomerPayments,
+                                ),
+                                SliverToBoxAdapter(
+                                  child: Column(
+                                    children: [
+                                      _build3DSummary(
+                                        grandTotalSales,
+                                        grandProfit + shortEatsProfit,
+                                        physicalCash,
+                                        totalCustomerPayments,
+                                      ),
+                                      _buildShortEatsSummaryCard(
+                                        shortEatsExpense,
+                                        shortEatsProfit,
+                                      ),
+                                      _buildBillSummaryCard(
+                                        totalBillExpenses,
+                                        filteredBills,
+                                      ),
+                                    ],
                                   ),
-                                  _buildShortEatsSummaryCard(
-                                    shortEatsExpense,
-                                    shortEatsProfit,
+                                ),
+                                if (selectedRange != null) ...[
+                                  SliverToBoxAdapter(
+                                    child: _buildSectionLabel(
+                                      "Sales Growth (3D Perspective)",
+                                    ),
                                   ),
-                                  _buildBillSummaryCard(
-                                    totalBillExpenses,
-                                    filteredBills,
+                                  SliverToBoxAdapter(
+                                    child: _buildCustom3DChart(salesByDate),
                                   ),
+                                  SliverToBoxAdapter(
+                                    child: _buildSectionLabel(
+                                      "Top 5 Selling Products",
+                                    ),
+                                  ),
+                                  SliverToBoxAdapter(
+                                    child: _buildTop5List(topProducts),
+                                  ),
+                                ] else ...[
+                                  SliverToBoxAdapter(
+                                    child: _buildSectionLabel(
+                                      "Today's Live Orders",
+                                    ),
+                                  ),
+                                  _buildTodayOrdersList(filteredOrders),
                                 ],
-                              ),
-                            ),
-                            if (selectedRange != null) ...[
-                              SliverToBoxAdapter(
-                                child: _buildSectionLabel(
-                                  "Sales Growth (3D Perspective)",
+                                const SliverToBoxAdapter(
+                                  child: SizedBox(height: 100),
                                 ),
-                              ),
-                              SliverToBoxAdapter(
-                                child: _buildCustom3DChart(salesByDate),
-                              ),
-                              SliverToBoxAdapter(
-                                child: _buildSectionLabel(
-                                  "Top 5 Selling Products",
-                                ),
-                              ),
-                              SliverToBoxAdapter(
-                                child: _buildTop5List(topProducts),
-                              ),
-                            ] else ...[
-                              SliverToBoxAdapter(
-                                child: _buildSectionLabel(
-                                  "Today's Live Orders",
-                                ),
-                              ),
-                              _buildTodayOrdersList(filteredOrders),
-                            ],
-                            const SliverToBoxAdapter(
-                              child: SizedBox(height: 100),
-                            ),
-                          ],
+                              ],
+                            );
+                          },
                         );
                       },
                     );
@@ -553,7 +618,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     );
   }
 
-  // --- Short Eats සාරාංශ පුවරුව (තෝරාගත් කාලයට අනුව update වේ) ---
+  // --- UI Helper Widgets (Unchanged) ---
   Widget _buildShortEatsSummaryCard(double expense, double profit) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
@@ -654,7 +719,6 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
             )
           else
             ...bills.take(5).map((b) {
-              // දිග වැඩි වීම වැලැක්වීමට මුල් 5 පෙන්වයි
               var data = b.data() as Map<String, dynamic>;
               return Padding(
                 padding: const EdgeInsets.only(top: 5),
@@ -705,6 +769,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
     double bills,
     double shortEatsExpense,
     double shortEatsProfit,
+    double customerPayments,
   ) => SliverAppBar(
     backgroundColor: Colors.transparent,
     elevation: 0,
@@ -729,45 +794,56 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
           bills,
           shortEatsExpense,
           shortEatsProfit,
+          customerPayments,
         ),
       ),
       const SizedBox(width: 10),
     ],
   );
 
-  Widget _build3DSummary(double total, double profit, double physicalCash) =>
-      Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
+  Widget _build3DSummary(
+    double total,
+    double profit,
+    double physicalCash,
+    double customerPayments,
+  ) => Padding(
+    padding: const EdgeInsets.all(20),
+    child: Column(
+      children: [
+        Row(
           children: [
-            Row(
-              children: [
-                _summaryCard(
-                  "TOTAL SALES",
-                  "€${total.toStringAsFixed(2)}",
-                  Colors.blueAccent,
-                ),
-                const SizedBox(width: 15),
-                _summaryCard(
-                  "NET PROFIT",
-                  "€${profit.toStringAsFixed(2)}",
-                  accentGreen,
-                ),
-              ],
+            _summaryCard(
+              "TOTAL SALES",
+              "€${total.toStringAsFixed(2)}",
+              Colors.blueAccent,
             ),
-            const SizedBox(height: 15),
-            Row(
-              children: [
-                _summaryCard(
-                  "PHYSICAL CASH BALANCE",
-                  "€${physicalCash.toStringAsFixed(2)}",
-                  Colors.orangeAccent,
-                ),
-              ],
+            const SizedBox(width: 15),
+            _summaryCard(
+              "NET PROFIT",
+              "€${profit.toStringAsFixed(2)}",
+              accentGreen,
             ),
           ],
         ),
-      );
+        const SizedBox(height: 15),
+        Row(
+          children: [
+            _summaryCard(
+              "CUST. PAYMENTS (+)",
+              "€${customerPayments.toStringAsFixed(2)}",
+              Colors.purpleAccent,
+            ),
+            const SizedBox(width: 15),
+            _summaryCard(
+              "PHYSICAL CASH",
+              "€${physicalCash.toStringAsFixed(2)}",
+              Colors.orangeAccent,
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
 
   Widget _summaryCard(String title, String value, Color color) => Expanded(
     child: Container(
@@ -1018,6 +1094,7 @@ class _BranchFinanceScreenState extends State<BranchFinanceScreen> {
   );
 }
 
+// Prism3DPainter remains same...
 class Prism3DPainter extends CustomPainter {
   final Color baseColor;
   Prism3DPainter(this.baseColor);

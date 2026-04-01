@@ -250,52 +250,101 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
     Map<String, dynamic> customerData,
     double payAmount,
   ) async {
+    // 1. අවශ්‍ය මූලික දත්ත ලබා ගැනීම
     double currentDebt =
         double.tryParse(customerData['total_debt']?.toString() ?? "0") ?? 0.0;
-    double newDebt = currentDebt - payAmount;
+
+    // 🔥 Floating Point Issue එක මෙතැනදී Fix කරන ලදී
+    double newDebt = double.parse((currentDebt - payAmount).toStringAsFixed(2));
+
+    String shop = customerData['shop'] ?? 'Unassigned';
+    String today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    String reportDocId = "${shop}_$today";
 
     try {
-      await FirebaseFirestore.instance
+      // References සාදා ගැනීම
+      DocumentReference customerRef = FirebaseFirestore.instance
           .collection('customers')
-          .doc(widget.customerId)
-          .update({
-            'total_debt': newDebt,
-            'last_payment_date': FieldValue.serverTimestamp(),
-          });
+          .doc(widget.customerId);
+      DocumentReference dailyReportRef = FirebaseFirestore.instance
+          .collection('daily_reports')
+          .doc(reportDocId);
 
-      await FirebaseFirestore.instance
-          .collection('customers')
-          .doc(widget.customerId)
-          .collection('history')
-          .add({
-            'type': 'PAYMENT',
-            'amount_paid': payAmount,
-            'remaining_balance': newDebt,
-            'date': DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()),
-          });
+      // --- 🔥 Transaction එක නිවැරදි පිළිවෙළට (Reads before Writes) ---
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        // පියවර 1: සියලුම READS (get) මෙතැනදී සිදු කළ යුතුයි
+        DocumentSnapshot dailySnap = await transaction.get(dailyReportRef);
 
+        // පියවර 2: සියලුම WRITES (update/set) මෙතැන් සිට සිදු කළ යුතුයි
+
+        // Customer ගේ ණය මුදල update කිරීම
+        transaction.update(customerRef, {
+          'total_debt': newDebt, // දැන් මෙතනට යන්නේ දශමස්ථාන 2ක අගයකි
+          'last_payment_date': FieldValue.serverTimestamp(),
+        });
+
+        // Daily Report එක Update කිරීම
+        if (!dailySnap.exists) {
+          transaction.set(dailyReportRef, {
+            'total_customer_payments': payAmount,
+            'shop': shop,
+            'date': today,
+            'last_updated': FieldValue.serverTimestamp(),
+          });
+        } else {
+          transaction.update(dailyReportRef, {
+            'total_customer_payments': FieldValue.increment(payAmount),
+            'last_updated': FieldValue.serverTimestamp(),
+          });
+        }
+      });
+
+      // 3. History එකට එකතු කිරීම (Transaction එකෙන් පිටත කළ හැක)
+      await customerRef.collection('history').add({
+        'type': 'PAYMENT',
+        'amount_paid': payAmount,
+        'remaining_balance': newDebt,
+        'date': DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()),
+      });
+
+      // 4. Notification Panel එකට Alert එක යැවීම
+      await FirebaseFirestore.instance.collection('notifications').add({
+        'type': 'payment_received',
+        'name': customerData['name'] ?? 'Unknown Customer',
+        'amount': payAmount.toStringAsFixed(2),
+        'remaining': newDebt.toStringAsFixed(2),
+        'shop': shop,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
+      // WhatsApp පණිවිඩය සකස් කිරීම
       String msg =
           """
-✅ *CONFERMA DI PAGAMENTO*
+✅ CONFERMA DI PAGAMENTO
 
 Gentile ${customerData['name'] ?? 'Cliente'},
-🇮🇹 Abbiamo ricevuto il tuo pagamento di *€${payAmount.toStringAsFixed(2)}*. Il tuo debito rimanente è di *€${newDebt.toStringAsFixed(2)}*. 
+🇮🇹 Abbiamo ricevuto il tuo pagamento di €${payAmount.toStringAsFixed(2)}. Il tuo debito rimanente è di €${newDebt.toStringAsFixed(2)}. 
 
-🇱🇰 ඔබගේ *€${payAmount.toStringAsFixed(2)}* ක ගෙවීම අප වෙත ලැබී ඇත. ඔබ ගෙවීමට ඇති ඉතිරි මුදල *€${newDebt.toStringAsFixed(2)}* වේ. 
+🇱🇰 ඔබගේ €${payAmount.toStringAsFixed(2)} ක ගෙවීම අප වෙත ලැබී ඇත. ඔබ ගෙවීමට ඇති ඉතිරි මුදල €${newDebt.toStringAsFixed(2)} වේ. 
 
-🙏 Grazie per aver scelto *Suhada S.R.L.S.*!
+🙏 Grazie per aver scelto Suhada S.R.L.S.!
 
-__________________________
-🤖 *Messaggio Automatico*
+__
+🤖 Messaggio Automatico
 """;
 
       if (mounted) {
-        Navigator.pop(context);
+        Navigator.pop(context); // Dialog එක වසන්න
         _paymentController.clear();
         await _sendWhatsAppMessage(customerData['phone'] ?? "", msg);
       }
     } catch (e) {
       debugPrint("Update Error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Error processing payment: $e")));
+      }
     }
   }
 
@@ -336,7 +385,6 @@ __________________________
                       Icons.settings_suggest,
                       color: Colors.white,
                     ),
-                    // 🟢 currentShop එකත් Dialog එකට යවනවා
                     onPressed: () =>
                         _showLimitEditDialog(creditLimit, currentShop),
                   ),
@@ -375,7 +423,6 @@ __________________________
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        // 🟢 Shop එකේ නම Profile එකේ පෙන්වීම
                         Text(
                           "${userData['phone'] ?? ""} ${currentShop.isNotEmpty ? "• $currentShop" : ""}",
                           style: const TextStyle(color: Colors.white70),
