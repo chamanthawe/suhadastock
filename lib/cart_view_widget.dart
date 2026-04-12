@@ -129,13 +129,16 @@ class CartViewWidget extends StatelessWidget {
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // --- Quantity කොටස ලොකු කළා ---
                         Text(
                           item['isWeighted'] == true
                               ? "${(item['qty'] as double).toStringAsFixed(3)} kg"
                               : "Qty: ${(item['qty'] as double).toInt()}",
                           style: const TextStyle(
-                            fontSize: 11,
-                            color: Colors.black,
+                            fontSize: 18, // 15 සිට 18 දක්වා වැඩි කළා
+                            fontWeight: FontWeight.bold,
+                            color:
+                                Colors.yellow, // වඩාත් පැහැදිලි වීමට කහ පාට කළා
                           ),
                         ),
                         if (hasDiscount)
@@ -144,7 +147,7 @@ class CartViewWidget extends StatelessWidget {
                               Text(
                                 "€${item['original_price'].toStringAsFixed(2)}",
                                 style: const TextStyle(
-                                  fontSize: 10,
+                                  fontSize: 12,
                                   color: Colors.red,
                                   decoration: TextDecoration.lineThrough,
                                 ),
@@ -153,7 +156,7 @@ class CartViewWidget extends StatelessWidget {
                               Text(
                                 "€${item['price'].toStringAsFixed(2)}",
                                 style: const TextStyle(
-                                  fontSize: 11,
+                                  fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.white,
                                 ),
@@ -161,20 +164,23 @@ class CartViewWidget extends StatelessWidget {
                             ],
                           )
                         else if (!item['id'].toString().contains('manual'))
+                          // --- Unit Price එක මෙතනින් ලොකු කළා ---
                           Text(
                             "€${item['price'].toStringAsFixed(2)}",
                             style: const TextStyle(
-                              fontSize: 10,
-                              color: Colors.black54,
+                              fontSize: 16, // 15 සිට 16 දක්වා වැඩි කළා
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black,
                             ),
                           ),
                       ],
                     ),
+                    // --- Screenshot එකේ රතු කරපු දකුණු පැත්තේ ගාන මෙන්න මෙතනින් ලොකු කළා ---
                     trailing: Text(
                       "€${(item['finalPrice'] as double).toStringAsFixed(2)}",
                       style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
+                        fontWeight: FontWeight.w900, // ඉතා තද කළා
+                        fontSize: 20, // 15 සිට 24 දක්වා වැඩි කළා
                         color: Colors.white,
                       ),
                     ),
@@ -237,7 +243,7 @@ class CartViewWidget extends StatelessWidget {
                 onLongPress: onLongPressTotal,
                 child: const Text(
                   "Total:",
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 25),
                 ),
               ),
               Text(
@@ -254,7 +260,8 @@ class CartViewWidget extends StatelessWidget {
           ElevatedButton(
             onPressed: globalCart.isEmpty ? null : onConfirmPrint,
             style: ElevatedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 45),
+              // --- Button එකේ උස මෙතනින් 90 කළා ---
+              minimumSize: const Size(double.infinity, 60),
               backgroundColor: primaryGreen,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -265,7 +272,7 @@ class CartViewWidget extends StatelessWidget {
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
-                fontSize: 16,
+                fontSize: 22, // අකුරුත් පොඩ්ඩක් ලොකු කළා
               ),
             ),
           ),

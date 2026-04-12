@@ -276,10 +276,11 @@ class _AfterPayScreenState extends State<AfterPayScreen> {
       padding: const EdgeInsets.all(16.0),
       child: TextField(
         controller: _searchController,
-        keyboardType: TextInputType.phone,
+        // නම සහ අංකය දෙකම search කිරීමට keyboard type එක text කළා
+        keyboardType: TextInputType.text,
         onChanged: (v) => setState(() {}),
         decoration: InputDecoration(
-          hintText: "Enter Phone Number...",
+          hintText: "Search Name or Phone Number...",
           prefixIcon: Icon(Icons.search, color: primaryGreen),
           filled: true,
           fillColor: primaryGreen.withOpacity(0.05),
@@ -299,15 +300,26 @@ class _AfterPayScreenState extends State<AfterPayScreen> {
         builder: (context, snapshot) {
           if (!snapshot.hasData)
             return const Center(child: CircularProgressIndicator());
+
+          String query = _searchController.text.toLowerCase();
+
           var docs = snapshot.data!.docs.where((d) {
             var data = d.data() as Map<String, dynamic>;
-            return (data['phone'] ?? "").toString().contains(
-              _searchController.text,
-            );
+            String name = (data['name'] ?? "").toString().toLowerCase();
+            String phone = (data['phone'] ?? "").toString();
+
+            // 🟢 Name එකෙන් හෝ Phone එකෙන් Search කළ හැකියි
+            return name.contains(query) || phone.contains(query);
           }).toList();
 
-          if (docs.isEmpty && _searchController.text.length > 5)
+          // Search එකේ ප්‍රතිඵල නැත්නම් සහ අංකයක් (Phone) search කරන බව පෙනේ නම් පමණක් අලුත් form එක පෙන්වයි
+          if (docs.isEmpty &&
+              _searchController.text.length > 5 &&
+              RegExp(r'^[0-9]+$').hasMatch(_searchController.text))
             return _buildNewCustomerForm();
+
+          if (docs.isEmpty)
+            return const Center(child: Text("No customers found."));
 
           return ListView.builder(
             itemCount: docs.length,
@@ -316,7 +328,6 @@ class _AfterPayScreenState extends State<AfterPayScreen> {
               var data = docs[i].data() as Map<String, dynamic>;
               double debt =
                   double.tryParse(data['total_debt']?.toString() ?? "0") ?? 0.0;
-              // 🟢 Customer ගේ Shop එක පෙන්වීමට අවශ්‍ය නම් Subtitle එකට දාන්න පුළුවන්
               String shop = data['shop'] ?? "";
 
               return Card(

@@ -1,8 +1,9 @@
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 class QuickProductGrid extends StatefulWidget {
   final Function(String, dynamic) onAddToCart;
@@ -212,7 +213,7 @@ class _QuickProductGridState extends State<QuickProductGrid> {
                           maxLines: 1,
                           textAlign: TextAlign.center,
                           style: const TextStyle(
-                            fontSize: 8,
+                            fontSize: 12,
                             fontWeight: FontWeight.bold,
                           ),
                         ),

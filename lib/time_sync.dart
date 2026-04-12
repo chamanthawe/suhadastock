@@ -1,26 +1,27 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart'; // compute සඳහා
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-class TimeSync {
+class TimeSync extends ChangeNotifier {
   static final TimeSync _instance = TimeSync._internal();
   factory TimeSync() => _instance;
   TimeSync._internal();
 
   Timer? _timer;
-  int secondsRemaining = 600;
+  // UI එකට විතරක් ඇහෙන විදිහට මේකNotifier එකක් කළා
+  final ValueNotifier<int> timerNotifier = ValueNotifier<int>(600);
+
+  int get secondsRemaining => timerNotifier.value;
   List<Map<String, dynamic>> pendingItems = [];
   List<String> syncLogs = [];
   bool isSyncing = false;
   String syncStatus = "Ready";
-
-  // --- අලුත් Variables ---
-  int todaySyncBatchCount = 0; // අද දින සාර්ථක වූ බැච් ගණන
-  String? lastSyncDate; // අවසන් වරට Sync වූ දිනය (Reset කිරීමට)
-
+  int todaySyncBatchCount = 0;
+  String? lastSyncDate;
   String? baseUrl, ck, cs, selectedShop;
 
   Future<void> init({
@@ -34,7 +35,7 @@ class TimeSync {
     cs = secret;
     selectedShop = shop;
     await _loadFromDisk();
-    _checkAndResetDailyCount(); // දවස අලුත් නම් Counter එක 0 කරයි
+    _checkAndResetDailyCount();
     _startTimer();
   }
 
@@ -44,17 +45,18 @@ class TimeSync {
       todaySyncBatchCount = 0;
       lastSyncDate = today;
       _saveToDisk();
+      notifyListeners();
     }
   }
 
   void _startTimer() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (secondsRemaining > 0)
-        secondsRemaining--;
-      else
+      if (timerNotifier.value > 0) {
+        timerNotifier.value--;
+      } else {
         triggerSync();
-
+      }
       if (pendingItems.length >= 20 && !isSyncing) triggerSync();
     });
   }
@@ -78,49 +80,47 @@ class TimeSync {
       });
     }
     await _saveToDisk();
+    notifyListeners();
   }
 
   Future<void> triggerSync() async {
-    if (isSyncing || pendingItems.isEmpty || baseUrl == null) {
-      if (pendingItems.isEmpty) syncStatus = "Ready";
-      return;
-    }
+    if (isSyncing || pendingItems.isEmpty || baseUrl == null) return;
 
-    _checkAndResetDailyCount();
     isSyncing = true;
     syncStatus = "Batch Syncing...";
-    secondsRemaining = 600;
-
-    List<Map<String, dynamic>> allToProcess = List.from(pendingItems);
+    notifyListeners();
+    timerNotifier.value = 600;
 
     try {
       int chunkSize = 20;
+      List<Map<String, dynamic>> allToProcess = List.from(pendingItems);
 
       for (var i = 0; i < allToProcess.length; i += chunkSize) {
-        final stopwatch = Stopwatch()..start();
         int end = (i + chunkSize < allToProcess.length)
             ? i + chunkSize
             : allToProcess.length;
         List<Map<String, dynamic>> currentChunk = allToProcess.sublist(i, end);
 
-        _addLog(
-          "Starting Batch: ${i ~/ chunkSize + 1} (${currentChunk.length} items)",
-        );
         List<Map<String, dynamic>> updatePayload = [];
-        List<String> successfulIdsInThisBatch = [];
+        List<String> successfulIds = [];
 
         for (var data in currentChunk) {
           try {
-            final getUrl =
-                "$baseUrl/products/${data['id']}?consumer_key=$ck&consumer_secret=$cs";
             final response = await http
-                .get(Uri.parse(getUrl))
-                .timeout(const Duration(seconds: 15));
+                .get(
+                  Uri.parse(
+                    "$baseUrl/products/${data['id']}?consumer_key=$ck&consumer_secret=$cs",
+                  ),
+                )
+                .timeout(const Duration(seconds: 10));
 
             if (response.statusCode == 200) {
-              var serverData = jsonDecode(response.body);
-              int currentServerStock = serverData['stock_quantity'] ?? 0;
-              int finalStock = (currentServerStock - data['soldQty'])
+              // පරණ iPad එකේ thread එක හිර නොවෙන්න compute පාවිච්චි කිරීම
+              var serverData =
+                  await compute(jsonDecode, response.body)
+                      as Map<String, dynamic>;
+              int currentStock = serverData['stock_quantity'] ?? 0;
+              int finalStock = (currentStock - data['soldQty'])
                   .clamp(0, 999999)
                   .toInt();
 
@@ -131,61 +131,52 @@ class TimeSync {
                   {"key": data['targetKey'], "value": finalStock.toString()},
                 ],
               });
-              successfulIdsInThisBatch.add(data['id']);
+              successfulIds.add(data['id']);
             }
           } catch (e) {
-            _addLog("Fetch Error: ${data['name']} - Will retry");
+            _addLog("Fetch Error: ${data['name']}");
           }
         }
 
         if (updatePayload.isNotEmpty) {
-          final batchUrl =
-              "$baseUrl/products/batch?consumer_key=$ck&consumer_secret=$cs";
           final putResponse = await http
               .post(
-                Uri.parse(batchUrl),
+                Uri.parse(
+                  "$baseUrl/products/batch?consumer_key=$ck&consumer_secret=$cs",
+                ),
                 headers: {"Content-Type": "application/json"},
                 body: jsonEncode({"update": updatePayload}),
               )
-              .timeout(const Duration(seconds: 30));
-
-          stopwatch.stop();
+              .timeout(const Duration(seconds: 20));
 
           if (putResponse.statusCode == 200 || putResponse.statusCode == 201) {
-            todaySyncBatchCount++; // බැච් එක සාර්ථකයි
-            _addLog(
-              "Batch Success (${stopwatch.elapsedMilliseconds}ms) - Count: $todaySyncBatchCount",
-            );
-
-            // සාර්ථක වූ අයිටම් පමණක් ලිස්ට් එකෙන් ඉවත් කරයි
+            todaySyncBatchCount++;
             pendingItems.removeWhere(
-              (item) => successfulIdsInThisBatch.contains(item['id']),
+              (item) => successfulIds.contains(item['id']),
             );
+            _addLog("Batch Success - Count: $todaySyncBatchCount");
             await _saveToDisk();
-          } else {
-            _addLog("Server Error in Batch - Keeping items in list");
           }
         }
-
-        if (end < allToProcess.length) {
-          _addLog("Cooldown (3s)...");
+        if (end < allToProcess.length)
           await Future.delayed(const Duration(seconds: 3));
-        }
       }
-
-      syncStatus = pendingItems.isEmpty ? "Done" : "Partial (Items remaining)";
+      syncStatus = pendingItems.isEmpty ? "Done" : "Partial";
     } catch (e) {
-      _addLog("Network Error - Pending retry");
-      syncStatus = "Pending Retry";
+      syncStatus = "Network Error";
     } finally {
       isSyncing = false;
+      notifyListeners();
     }
   }
 
   void _addLog(String message) {
-    String time = DateFormat('HH:mm:ss').format(DateTime.now());
-    syncLogs.insert(0, "[$time] $message");
-    if (syncLogs.length > 30) syncLogs.removeLast();
+    syncLogs.insert(
+      0,
+      "[${DateFormat('HH:mm:ss').format(DateTime.now())}] $message",
+    );
+    if (syncLogs.length > 20) syncLogs.removeLast();
+    notifyListeners();
   }
 
   Future<void> _saveToDisk() async {
@@ -200,13 +191,8 @@ class TimeSync {
     String? data = prefs.getString('time_sync_data');
     todaySyncBatchCount = prefs.getInt('today_sync_batch_count') ?? 0;
     lastSyncDate = prefs.getString('last_sync_date');
-
-    if (data != null) {
-      try {
-        pendingItems = List<Map<String, dynamic>>.from(jsonDecode(data));
-      } catch (e) {
-        pendingItems = [];
-      }
-    }
+    if (data != null)
+      pendingItems = List<Map<String, dynamic>>.from(jsonDecode(data));
+    notifyListeners();
   }
 }

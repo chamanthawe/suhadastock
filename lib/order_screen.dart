@@ -6,7 +6,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/services.dart'; // Sound effect සඳහා
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
@@ -18,6 +18,8 @@ import 'case_break_overlay.dart';
 import 'case_management_service.dart';
 import 'low_stock_alert_widget.dart';
 import 'offline_overlay_widget.dart';
+// --- අලුතින් එකතු කළ Page එක ---
+import 'orderscreen_points.dart';
 import 'orderscreen_setting.dart';
 import 'payment_dialog.dart';
 import 'printer_manager.dart';
@@ -59,7 +61,7 @@ class _OrderScreenState extends State<OrderScreen> {
   bool _isCheckingConnectivity = false;
   Timer? _connectivityTimer;
 
-  // --- Loyalty Customer Variable ---
+  double _lastOrderTotal = 0.0;
   Map<String, dynamic>? _selectedLoyalCustomer;
 
   List<Map<String, dynamic>?> quickProducts = List.filled(50, null);
@@ -115,8 +117,29 @@ class _OrderScreenState extends State<OrderScreen> {
     });
   }
 
+  // --- Loyalty Points Redeem Logic ---
+  void _handlePointRedemption(double euroAmount, int pointsUsed) {
+    setState(() {
+      globalDiscount += euroAmount;
+      if (_selectedLoyalCustomer != null) {
+        _selectedLoyalCustomer!['points'] =
+            (_selectedLoyalCustomer!['points'] ?? 0) - pointsUsed;
+      }
+      _calculateTotal();
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          "€$euroAmount Discount Applied! $pointsUsed Points used.",
+        ),
+        backgroundColor: Colors.orange[800],
+      ),
+    );
+  }
+
   void _startConnectivityCheck() {
-    _connectivityTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+    _connectivityTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       _checkStatus();
     });
   }
@@ -144,6 +167,11 @@ class _OrderScreenState extends State<OrderScreen> {
     } catch (e) {
       debugPrint("Sound Play Error: $e");
     }
+  }
+
+  // 🔊 Touch Sound Effect එක සඳහා වන function එක
+  void _playTouchSound() {
+    SystemSound.play(SystemSoundType.click);
   }
 
   void _holdCurrentCart() {
@@ -231,221 +259,321 @@ class _OrderScreenState extends State<OrderScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        KeyboardListener(
-          focusNode: _barcodeFocusNode,
-          autofocus: true,
-          onKeyEvent: (event) {
-            if (event is KeyDownEvent) {
-              if (event.logicalKey == LogicalKeyboardKey.enter) {
-                _handleBarcodeScan(_barcodeBuffer);
-              } else if (event.character != null) {
-                _barcodeBuffer += event.character!;
+    // මුළු Screen එකටම Touch Sound ලැබෙන සේ Wrap කිරීම
+    return GestureDetector(
+      onTap: _playTouchSound,
+      child: Stack(
+        children: [
+          KeyboardListener(
+            focusNode: _barcodeFocusNode,
+            autofocus: true,
+            onKeyEvent: (event) {
+              if (event is KeyDownEvent) {
+                if (event.logicalKey == LogicalKeyboardKey.enter) {
+                  _handleBarcodeScan(_barcodeBuffer);
+                } else if (event.character != null) {
+                  _barcodeBuffer += event.character!;
+                }
               }
-            }
-          },
-          child: Scaffold(
-            backgroundColor: Colors.white,
-            appBar: AppBar(
-              title: Row(
-                children: [
-                  Text(
-                    "${widget.selectedShop} POS",
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
+            },
+            child: Scaffold(
+              backgroundColor: Colors.white,
+              appBar: AppBar(
+                title: Row(
+                  children: [
+                    Text(
+                      "${widget.selectedShop} POS",
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
                     ),
-                  ),
-                  if (_selectedLoyalCustomer != null) ...[
-                    const SizedBox(width: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.person,
-                            size: 14,
-                            color: Colors.white,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            "${_selectedLoyalCustomer!['name']}",
-                            style: const TextStyle(
-                              fontSize: 13,
+                    if (_selectedLoyalCustomer != null) ...[
+                      const SizedBox(width: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.person,
+                              size: 14,
                               color: Colors.white,
                             ),
-                          ),
-                          const SizedBox(width: 4),
-                          GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _selectedLoyalCustomer = null;
-                                _calculateTotal();
-                              });
-                            },
-                            child: const Icon(
-                              Icons.cancel,
-                              size: 16,
-                              color: Colors.white70,
+                            const SizedBox(width: 4),
+                            Text(
+                              "${_selectedLoyalCustomer!['name']}",
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.white,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              toolbarHeight: 45,
-              backgroundColor: primaryGreen,
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.menu_rounded, color: Colors.white),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => OrderScreenSetting(
-                          isRefreshing:
-                              _isRefreshingStock || _isLoadingProducts,
-                          onRefreshStock: _refreshAllStock,
-                          baseUrl: widget.baseUrl,
-                          ck: widget.ck,
-                          cs: widget.cs,
-                          selectedShop: widget.selectedShop,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(width: 8),
-              ],
-            ),
-            body: Column(
-              children: [
-                _buildSearchBar(),
-                Expanded(
-                  child: Stack(
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            flex: 1,
-                            child: CartViewWidget(
-                              globalCart: globalCart,
-                              heldCart: heldCart,
-                              globalDiscount: globalDiscount,
-                              totalValue: totalValue,
-                              totalProfit: totalProfit,
-                              showSecretProfit: _showSecretProfit,
-                              primaryGreen: primaryGreen,
-                              lightGreenBg: lightGreenBg,
-                              scrollController: _cartScrollController,
-                              onHoldCart: _holdCurrentCart,
-                              onRecallCart: _recallCart,
-                              onAddToCart: _addToCart,
-                              onRemoveItem: (index) {
+                            const SizedBox(width: 4),
+                            GestureDetector(
+                              onTap: () {
                                 setState(() {
-                                  if (globalCart[index]['qty'] > 1) {
-                                    globalCart[index]['qty']--;
-                                    _calculateTotal();
-                                  } else {
-                                    globalCart.removeAt(index);
-                                    _calculateTotal();
-                                  }
+                                  _selectedLoyalCustomer = null;
+                                  _calculateTotal();
                                 });
                               },
-                              onLongPressTotal: () => setState(
-                                () => _showSecretProfit = !_showSecretProfit,
+                              child: const Icon(
+                                Icons.cancel,
+                                size: 16,
+                                color: Colors.white70,
                               ),
-                              onConfirmPrint: () => _handlePrint(),
                             ),
-                          ),
-                          const VerticalDivider(width: 1, thickness: 1),
-                          Expanded(
-                            flex: 2,
-                            child: Column(
-                              children: [
-                                Expanded(
-                                  flex: 3,
-                                  child: _buildQuickGridSection(),
-                                ),
-                                Expanded(
-                                  flex: 3,
-                                  child: _buildBottomActionSection(),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      SearchOverlayWidget(
-                        searchResults: _searchResults,
-                        primaryGreen: primaryGreen,
-                        accentGreen: accentGreen,
-                        getLiveStock: _getLiveStockFromCache,
-                        onProductSelect: (name, product) {
-                          _addToCart(name, product);
-                          setState(() {
-                            _searchResults = [];
-                            _searchController.clear();
-                          });
-                          _barcodeFocusNode.requestFocus();
-                        },
+                          ],
+                        ),
                       ),
                     ],
-                  ),
+                  ],
                 ),
-              ],
+                toolbarHeight: 45,
+                backgroundColor: primaryGreen,
+                actions: [
+                  ListenableBuilder(
+                    listenable: TimeSync(),
+                    builder: (context, child) {
+                      int pendingCount = TimeSync().pendingItems.length;
+                      bool isSyncing = TimeSync().isSyncing;
+
+                      return Row(
+                        children: [
+                          if (_lastOrderTotal > 0)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              margin: const EdgeInsets.only(right: 10),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.white24),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Text(
+                                    "LAST: ",
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      color: Colors.white70,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  Text(
+                                    "€${_lastOrderTotal.toStringAsFixed(2)}",
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontFamily: 'monospace',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Icon(
+                                Icons.sync_rounded,
+                                color: isSyncing
+                                    ? Colors.orangeAccent
+                                    : Colors.white70,
+                                size: 22,
+                              ),
+                              if (pendingCount > 0)
+                                Positioned(
+                                  right: 0,
+                                  top: 0,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.redAccent,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: primaryGreen,
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                    constraints: const BoxConstraints(
+                                      minWidth: 14,
+                                      minHeight: 14,
+                                    ),
+                                    child: Text(
+                                      '$pendingCount',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 8,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(width: 5),
+                        ],
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.menu_rounded, color: Colors.white),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => OrderScreenSetting(
+                            isRefreshing:
+                                _isRefreshingStock || _isLoadingProducts,
+                            onRefreshStock: _refreshAllStock,
+                            baseUrl: widget.baseUrl,
+                            ck: widget.ck,
+                            cs: widget.cs,
+                            selectedShop: widget.selectedShop,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                ],
+              ),
+              body: Column(
+                children: [
+                  _buildSearchBar(),
+                  if (_selectedLoyalCustomer != null)
+                    OrderScreenPoints(
+                      customerData: _selectedLoyalCustomer!,
+                      currentTotal: totalValue,
+                      onApplyPoints: _handlePointRedemption,
+                    ),
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 1,
+                              child: CartViewWidget(
+                                globalCart: globalCart,
+                                heldCart: heldCart,
+                                globalDiscount: globalDiscount,
+                                totalValue: totalValue,
+                                totalProfit: totalProfit,
+                                showSecretProfit: _showSecretProfit,
+                                primaryGreen: Colors
+                                    .red, // Button color එක Red ලෙස වෙනස් කරා
+                                lightGreenBg: lightGreenBg,
+                                scrollController: _cartScrollController,
+                                onHoldCart: _holdCurrentCart,
+                                onRecallCart: _recallCart,
+                                onAddToCart: _addToCart,
+                                onRemoveItem: (index) {
+                                  setState(() {
+                                    if (globalCart[index]['qty'] > 1) {
+                                      globalCart[index]['qty']--;
+                                      _calculateTotal();
+                                    } else {
+                                      globalCart.removeAt(index);
+                                      _calculateTotal();
+                                    }
+                                  });
+                                },
+                                onLongPressTotal: () => setState(
+                                  () => _showSecretProfit = !_showSecretProfit,
+                                ),
+                                onConfirmPrint: () => _handlePrint(),
+                                // මෙහි CartViewWidget එක ඇතුළේ ඇති Confirm button එකේ height එක 65 දක්වා වැඩි කරා (widget එකේ parameters අනුව)
+                              ),
+                            ),
+                            const VerticalDivider(width: 1, thickness: 1),
+                            Expanded(
+                              flex: 2,
+                              child: Column(
+                                children: [
+                                  Expanded(
+                                    flex: 3,
+                                    child: _buildQuickGridSection(),
+                                  ),
+                                  Expanded(
+                                    flex: 3,
+                                    child: _buildBottomActionSection(),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        SearchOverlayWidget(
+                          searchResults: _searchResults,
+                          primaryGreen: primaryGreen,
+                          accentGreen: accentGreen,
+                          getLiveStock: _getLiveStockFromCache,
+                          onProductSelect: (name, product) {
+                            _addToCart(name, product);
+                            setState(() {
+                              _searchResults = [];
+                              _searchController.clear();
+                            });
+                            _barcodeFocusNode.requestFocus();
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
 
-        if (_showCaseBreakButton && _detectedCaseProduct != null)
-          CaseBreakOverlay(
-            detectedProduct: _detectedCaseProduct!,
-            onBreak: _handleCaseBreakAndMove,
-            onClose: () => setState(() {
-              _showCaseBreakButton = false;
-              _detectedCaseProduct = null;
-            }),
-          ),
-
-        if (!_isOnline)
-          OfflineOverlayWidget(
-            isChecking: _isCheckingConnectivity,
-            primaryColor: primaryGreen,
-            onRetry: () async {
-              setState(() => _isCheckingConnectivity = true);
-              await _checkStatus();
-              setState(() => _isCheckingConnectivity = false);
-            },
-          ),
-
-        if (_lowStockProduct != null) ...[
-          GestureDetector(
-            onTap: () => setState(() => _lowStockProduct = null),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
-              child: Container(color: Colors.black.withValues(alpha: 0.55)),
+          if (_showCaseBreakButton && _detectedCaseProduct != null)
+            CaseBreakOverlay(
+              detectedProduct: _detectedCaseProduct!,
+              onBreak: _handleCaseBreakAndMove,
+              onClose: () => setState(() {
+                _showCaseBreakButton = false;
+                _detectedCaseProduct = null;
+              }),
             ),
-          ),
-          LowStockAlertWidget(
-            product: _lowStockProduct!,
-            currentStock: _lowStockValue,
-            onClose: () => setState(() => _lowStockProduct = null),
-          ),
+
+          if (!_isOnline)
+            OfflineOverlayWidget(
+              isChecking: _isCheckingConnectivity,
+              primaryColor: primaryGreen,
+              onRetry: () async {
+                setState(() => _isCheckingConnectivity = true);
+                await _checkStatus();
+                setState(() => _isCheckingConnectivity = false);
+              },
+            ),
+
+          if (_lowStockProduct != null) ...[
+            GestureDetector(
+              onTap: () => setState(() => _lowStockProduct = null),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                child: Container(color: Colors.black.withValues(alpha: 0.55)),
+              ),
+            ),
+            LowStockAlertWidget(
+              product: _lowStockProduct!,
+              currentStock: _lowStockValue,
+              onClose: () => setState(() => _lowStockProduct = null),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 
@@ -526,7 +654,9 @@ class _OrderScreenState extends State<OrderScreen> {
                   ),
                 ),
               );
-              if (result == true) await _handlePrint(isCredit: true);
+              if (result == true) {
+                _handlePrint(isCredit: true);
+              }
             },
             onClear: () {
               if (globalCart.isEmpty) return;
@@ -654,7 +784,6 @@ class _OrderScreenState extends State<OrderScreen> {
     String cleanBarcode = barcode.trim().replaceAll(RegExp(r'[\n\r]'), '');
     if (cleanBarcode.isEmpty) return;
 
-    // --- 1. Customer Scan Check ---
     try {
       var customerQuery = await FirebaseFirestore.instance
           .collection('loyal_customers')
@@ -662,7 +791,10 @@ class _OrderScreenState extends State<OrderScreen> {
           .get();
 
       if (customerQuery.docs.isNotEmpty) {
-        var customerData = customerQuery.docs.first.data();
+        var customerDoc = customerQuery.docs.first;
+        var customerData = customerDoc.data();
+        customerData['id'] = customerDoc.id;
+
         setState(() {
           _selectedLoyalCustomer = customerData;
           _calculateTotal();
@@ -682,7 +814,6 @@ class _OrderScreenState extends State<OrderScreen> {
       debugPrint("Loyalty Error: $e");
     }
 
-    // --- 2. Pending Order Scan (ID 15+) ---
     if (cleanBarcode.length >= 15) {
       try {
         var pendingDoc = await FirebaseFirestore.instance
@@ -740,7 +871,6 @@ class _OrderScreenState extends State<OrderScreen> {
       }
     }
 
-    // --- 3. Normal Product Barcode Search ---
     List<Map<String, dynamic>> matchingProducts = _localProductCache.values
         .where((p) {
           String pBarcode = p['barcode'].toString().trim();
@@ -868,7 +998,6 @@ class _OrderScreenState extends State<OrderScreen> {
       double unitPrice = shopPrice;
       bool applied = false;
 
-      // Loyalty logic integration
       if (_selectedLoyalCustomer != null) {
         bool isLoyal = _selectedLoyalCustomer!['loyal_discount'] ?? false;
         bool isBusiness =
@@ -889,7 +1018,6 @@ class _OrderScreenState extends State<OrderScreen> {
           }
         }
 
-        // --- Logic fix: Apply discount_price if loyal and no business price was applied ---
         if (!applied && isLoyal) {
           double dPrice =
               double.tryParse(cached?['discount_price']?.toString() ?? "0.0") ??
@@ -1299,30 +1427,70 @@ class _OrderScreenState extends State<OrderScreen> {
   ) async {
     final String d = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final String t = DateFormat('HH:mm').format(DateTime.now());
+
+    final customerAtOrdering = _selectedLoyalCustomer;
+
     await FirebaseFirestore.instance.collection('orders').add({
       'shop': widget.selectedShop,
       'total_sales': total,
       'net_profit': profit,
       'discount': discount,
       'items': items,
+      'customer_id': customerAtOrdering != null
+          ? customerAtOrdering['id']
+          : null,
+      'customer_name': customerAtOrdering != null
+          ? customerAtOrdering['name']
+          : "Walk-in",
       'date': d,
       'time': t,
       'timestamp': FieldValue.serverTimestamp(),
     });
 
+    if (customerAtOrdering != null && customerAtOrdering['id'] != null) {
+      try {
+        var loyaltyConfig = await FirebaseFirestore.instance
+            .collection('settings')
+            .doc('loyalty_config')
+            .get();
+
+        int pointsPerItem = 1;
+        if (loyaltyConfig.exists) {
+          pointsPerItem = loyaltyConfig.data()?['points_per_item'] ?? 1;
+        }
+
+        double totalQtyInCart = 0;
+        for (var item in items) {
+          totalQtyInCart += (item['qty'] as num).toDouble();
+        }
+
+        int earnedPoints = (totalQtyInCart * pointsPerItem).floor();
+
+        if (earnedPoints > 0 || total > 0) {
+          await FirebaseFirestore.instance
+              .collection('loyal_customers')
+              .doc(customerAtOrdering['id'])
+              .update({
+                'points': FieldValue.increment(earnedPoints),
+                'total_spent_annual': FieldValue.increment(total),
+                'total_spent': FieldValue.increment(total),
+                'last_purchase_date': d,
+              });
+
+          debugPrint(
+            "Points added based on Quantity ($totalQtyInCart items): $earnedPoints Pts for ${customerAtOrdering['name']}",
+          );
+        }
+      } catch (e) {
+        debugPrint("Error updating loyalty data: $e");
+      }
+    }
+
     for (var item in items) {
       if (item['id'].toString().contains('manual')) continue;
       bool isBat = widget.selectedShop.toLowerCase().contains("battistini");
       String targetKey = isBat ? "battistini_stock" : "cassia_stock";
-      var cachedItem = _localProductCache[item['id'].toString()];
-      bool isWeightedProduct =
-          (item['isWeighted'] == true) ||
-          (item['is_weighted'] == true) ||
-          (cachedItem != null && cachedItem['is_weighted'] == true);
-      if (!isWeightedProduct) {
-        int qtyToSync = (item['qty'] as num).toInt();
-        await TimeSync().addOrder(item, qtyToSync, targetKey);
-      }
+      await TimeSync().addOrder(item, (item['qty'] as num).toInt(), targetKey);
     }
     _updateWooStockFast(items);
   }
@@ -1357,6 +1525,10 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   void _resetAfterOrder(String m) {
+    if (totalValue > 0) {
+      _lastOrderTotal = totalValue;
+    }
+
     setState(() {
       globalCart.clear();
       globalDiscount = 0;
@@ -1395,33 +1567,95 @@ class _OrderScreenState extends State<OrderScreen> {
 
   void _applyDiscount() {
     final tc = TextEditingController();
+    bool isPercentage = false; // Percentage ද නැද්ද කියලා දැනගන්න variable එකක්
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        title: const Text("Discount"),
-        content: TextField(
-          controller: tc,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(prefixText: "€ "),
+      builder: (context) => StatefulBuilder(
+        // Dialog එක ඇතුළේ UI එක update කරන්න StatefulBuilder ගත්තා
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+          ),
+          title: const Text("Add Discount"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Button දෙක: Amount ද Percentage ද කියලා තෝරන්න
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: !isPercentage
+                            ? primaryGreen
+                            : Colors.grey[300],
+                        foregroundColor: !isPercentage
+                            ? Colors.white
+                            : Colors.black,
+                      ),
+                      onPressed: () =>
+                          setDialogState(() => isPercentage = false),
+                      child: const Text("Fixed (€)"),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isPercentage
+                            ? primaryGreen
+                            : Colors.grey[300],
+                        foregroundColor: isPercentage
+                            ? Colors.white
+                            : Colors.black,
+                      ),
+                      onPressed: () =>
+                          setDialogState(() => isPercentage = true),
+                      child: const Text("Percent (%)"),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 15),
+              TextField(
+                controller: tc,
+                keyboardType: TextInputType.number,
+                autofocus: true,
+                decoration: InputDecoration(
+                  prefixText: isPercentage ? "% " : "€ ",
+                  border: const OutlineInputBorder(),
+                  hintText: "Enter value",
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: primaryGreen),
+              onPressed: () {
+                double val = double.tryParse(tc.text) ?? 0;
+                setState(() {
+                  if (isPercentage) {
+                    // බිලේ මුළු එකතුවෙන් ප්‍රතිශතය ගණනය කිරීම (globalDiscount එකට කලින් තිබ්බ total එක එකතු කරලා ගන්නවා)
+                    double currentTotalBeforeDiscount =
+                        totalValue + globalDiscount;
+                    globalDiscount = (currentTotalBeforeDiscount * val) / 100;
+                  } else {
+                    globalDiscount = val;
+                  }
+                });
+                _calculateTotal();
+                Navigator.pop(context);
+              },
+              child: const Text("Apply", style: TextStyle(color: Colors.white)),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: primaryGreen),
-            onPressed: () {
-              setState(() {
-                globalDiscount = double.tryParse(tc.text) ?? 0;
-              });
-              _calculateTotal();
-              Navigator.pop(context);
-            },
-            child: const Text("Apply", style: TextStyle(color: Colors.white)),
-          ),
-        ],
       ),
     );
   }

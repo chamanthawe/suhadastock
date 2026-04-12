@@ -471,6 +471,42 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
               child: Column(
                 children: [
                   _buildCard("BASIC INFORMATION", [
+                    // --- අලුතින් එකතු කළ Product ID කොටස ---
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.blueGrey[50],
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.blueGrey[100]!),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.fingerprint,
+                              color: Colors.blueGrey[700],
+                              size: 20,
+                            ),
+                            const SizedBox(width: 10),
+                            const Text(
+                              "Product ID: ",
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            SelectableText(
+                              widget.product['id'].toString(),
+                              style: TextStyle(
+                                color: darkGreen,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
                     _buildTextField(
                       _nameController,
                       "Product Name",
